@@ -10,9 +10,9 @@ from app import characters, crafting, expeditions
 from app.bus import CommandBus
 from app.models import Outbox, Timer
 from app.models_game import Character, Ship
+from app.timer_handlers import build_timer_handlers
 from core.errors import DomainError
 from tests.conftest import requires_db
-from worker.main import timer_handlers_stub
 
 
 async def _character(session, seeded, scrap: int = 0, fuel: int = 50) -> Character:
@@ -44,7 +44,7 @@ async def _backdate_job(session: AsyncSession, job) -> None:
 
 async def _run_due(session: AsyncSession, bus: CommandBus | None = None) -> int:
     bus = bus or CommandBus()
-    handlers = await timer_handlers_stub()
+    handlers = await build_timer_handlers()
     return await bus.run_due_timers(timer_handlers=handlers, session=session)
 
 

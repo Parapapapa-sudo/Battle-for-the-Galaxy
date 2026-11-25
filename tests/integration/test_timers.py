@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Timer
+from app.timer_handlers import build_timer_handlers
 from tests.conftest import requires_db
-from worker.main import timer_handlers_stub
 
 
 async def _add_timer(
@@ -34,7 +34,7 @@ async def _add_timer(
 @requires_db
 async def test_due_timer_fires(session, bus):
     await _add_timer(session, payload={"hello": "world"})
-    handlers = await timer_handlers_stub()
+    handlers = await build_timer_handlers()
 
     processed = await bus.run_due_timers(timer_handlers=handlers, session=session)
     assert processed == 1
@@ -46,7 +46,7 @@ async def test_due_timer_fires(session, bus):
 @requires_db
 async def test_future_timer_not_claimed(session, bus):
     await _add_timer(session, fires_at=datetime.now(UTC) + timedelta(hours=1))
-    handlers = await timer_handlers_stub()
+    handlers = await build_timer_handlers()
 
     assert await bus.run_due_timers(timer_handlers=handlers, session=session) == 0
     [timer] = (await session.scalars(select(Timer))).all()
@@ -57,7 +57,7 @@ async def test_future_timer_not_claimed(session, bus):
 async def test_rerun_does_not_duplicate_effect(session, bus):
     """Повторный прогон не берёт уже fired таймеры (идемпотентность — ТЗ)."""
     await _add_timer(session)
-    handlers = await timer_handlers_stub()
+    handlers = await build_timer_handlers()
 
     assert await bus.run_due_timers(timer_handlers=handlers, session=session) == 1
     assert await bus.run_due_timers(timer_handlers=handlers, session=session) == 0
@@ -85,5 +85,5 @@ async def test_cancel_timer(session, bus):
     await session.refresh(timer)
     assert timer.status == "cancelled"
 
-    handlers = await timer_handlers_stub()
+    handlers = await build_timer_handlers()
     assert await bus.run_due_timers(timer_handlers=handlers, session=session) == 0

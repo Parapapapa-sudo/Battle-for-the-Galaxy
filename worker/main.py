@@ -6,71 +6,12 @@ import signal
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app import db, stores
+from app import db
 from app.bus import CommandBus
 from app.config import Settings
 from worker.dispatcher import OutboxDispatcher
 
 log = structlog.get_logger(__name__)
-
-
-async def timer_handlers_stub() -> dict[str, stores.TimerHandler]:
-    """Обработчики типов таймеров (реальные типы добавляются по этапам)."""
-
-    async def ping(session: AsyncSession, payload: stores.Params) -> None:
-        log.info("timer_ping", payload=payload)
-
-    async def exp_return_arrival(session: AsyncSession, payload: stores.Params) -> None:
-        from app.expeditions import arrive_expedition
-
-        await arrive_expedition(session, payload)
-
-    async def craft_done(session: AsyncSession, payload: stores.Params) -> None:
-        from app.crafting import craft_done_handler
-
-        await craft_done_handler(session, payload)
-
-    async def transfer_expiry(session: AsyncSession, payload: stores.Params) -> None:
-        from app.economy import transfer_expiry_handler
-
-        await transfer_expiry_handler(session, payload)
-
-    async def auction_expiry(session: AsyncSession, payload: stores.Params) -> None:
-        from app.market import auction_expiry_handler
-
-        await auction_expiry_handler(session, payload)
-
-    async def auction_return(session: AsyncSession, payload: stores.Params) -> None:
-        from app.market import auction_return_handler
-
-        await auction_return_handler(session, payload)
-
-    async def subscription_expiry(session: AsyncSession, payload: stores.Params) -> None:
-        from app.market import subscription_expiry_handler
-
-        await subscription_expiry_handler(session, payload)
-
-    async def faction_event_start(session: AsyncSession, payload: stores.Params) -> None:
-        from app.quests import faction_event_start_handler
-
-        await faction_event_start_handler(session, payload)
-
-    async def faction_event_end(session: AsyncSession, payload: stores.Params) -> None:
-        from app.quests import faction_event_end_handler
-
-        await faction_event_end_handler(session, payload)
-
-    return {
-        "ping": ping,
-        "exp_return_arrival": exp_return_arrival,
-        "craft_done": craft_done,
-        "transfer_expiry": transfer_expiry,
-        "auction_expiry": auction_expiry,
-        "auction_return": auction_return,
-        "subscription_expiry": subscription_expiry,
-        "faction_event_start": faction_event_start,
-        "faction_event_end": faction_event_end,
-    }
 
 
 async def _settle_eon_market(sessions: async_sessionmaker[AsyncSession]) -> None:
@@ -100,7 +41,9 @@ async def run_worker(
     dispatcher: OutboxDispatcher,
 ) -> None:
     bus = CommandBus(sessions)
-    handlers = await timer_handlers_stub()
+    from app.timer_handlers import build_timer_handlers
+
+    handlers = await build_timer_handlers()
     stop = asyncio.Event()
 
     loop = asyncio.get_running_loop()

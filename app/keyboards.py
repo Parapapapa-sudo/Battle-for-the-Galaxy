@@ -64,7 +64,7 @@ async def keyboard_for_character(
     expedition = await get_ongoing_expedition(session, character_id)
     if expedition is not None:
         if expedition.status == "returning":
-            return vk_keyboard([["exp"]])
+            return vk_keyboard([["exp", "sync"]])
         offered = await _current_offered_event(session, expedition)
         if offered is not None and offered.snapshot.get("kind") == "interactive":
             keys = [str(c.get("key")) for c in offered.snapshot.get("script", {}).get("choices", [])]

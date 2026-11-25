@@ -602,6 +602,22 @@ async def cmd_buy(session: AsyncSession, ctx: CommandContext, args: dict[str, An
     return CommandResult(message=f"Покупка «{code}» оплачена ({purchase.status}).")
 
 
+async def cmd_sync(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Анти-застревание: обработать просроченные таймеры игрока (прибытие, крафт…).
+
+    На сервере это делает worker; команда нужна, когда worker не запущен (локальный
+    запуск) или как ручной рычаг «докрутить» прогресс.
+    """
+    from app.timer_handlers import sync_character_timers
+
+    assert ctx.character_id is not None
+    fired = await sync_character_timers(session, ctx.character_id)
+    if not fired:
+        return CommandResult(message="Все таймеры в норме, застреваний нет.")
+    names = ", ".join(fired)
+    return CommandResult(message=f"Обработано просроченных событий: {names}.")
+
+
 async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     text = await quests_mod.describe_quests(session, character)
@@ -776,4 +792,6 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "buy": cmd_buy,
     # этап 8: задания и фракционные события
     "quests": cmd_quests,
+    # анти-застревание (локальный запуск без worker'а)
+    "sync": cmd_sync,
 }

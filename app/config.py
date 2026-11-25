@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # платежи: базовый URL для webhook/pay_url мок-провайдера (в проде — публичный адрес)
     payments_base_url: str = "http://localhost:8000"
 
+    # VK Mini App: защищённый ключ приложения (верификация launch params, решение C2)
+    vk_app_secret: str | None = None
+    # сервисный ключ (серверные вызовы VK API — не используется для подписи)
+    vk_service_token: str | None = None
+
     # worker
     worker_poll_interval_sec: float = 1.0
     outbox_batch_size: int = 50

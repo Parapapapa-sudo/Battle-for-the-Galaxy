@@ -14,8 +14,8 @@ from app.models_game import (
     QuestTemplate,
     Ship,
 )
+from app.timer_handlers import build_timer_handlers
 from tests.conftest import requires_db
-from worker.main import timer_handlers_stub
 
 
 async def _character(session, seeded) -> Character:
@@ -39,7 +39,7 @@ async def _active_quest(session, character) -> tuple[CharacterQuest, QuestTempla
 
 async def _run_due(session, bus=None) -> int:
     bus = bus or CommandBus()
-    handlers = await timer_handlers_stub()
+    handlers = await build_timer_handlers()
     return int(await bus.run_due_timers(timer_handlers=handlers, session=session))
 
 
