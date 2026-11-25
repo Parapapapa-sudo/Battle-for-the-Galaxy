@@ -1,0 +1,41 @@
+[project]
+name = "space-mmo-mvp"
+version = "0.1.0"
+description = "Text space MMORPG MVP (VK chat, Mini App)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"adapters/http/**" = ["B008"]  # Depends(...) в аргументах — идиома FastAPI
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["alembic.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "integration: требует PostgreSQL (переменная TEST_DATABASE_URL)",
+]
+
+[tool.coverage.run]
+source = ["app", "core", "worker"]

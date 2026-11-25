@@ -1,0 +1,55 @@
+"""Локальный стек разработки: PostgreSQL 16 (+ зарезервированный Redis).
+
+Запуск: docker compose -f deploy/docker-compose.yml up -d db
+"""
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: space_mmo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Зарезервировано под hot-cache конфигурации и rate limit (подключается позже,
+  # пока не требуется: блокировки — advisory в PostgreSQL).
+  # redis:
+  #   image: redis:7-alpine
+  #   ports: ["6379:6379"]
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/space_mmo
+      APP_ENV: dev
+    ports:
+      - "8000:8000"
+    profiles: ["app"]  # без профиля поднимается только инфраструктура
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "worker.main"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/space_mmo
+      APP_ENV: dev
+    profiles: ["app"]
+
+volumes:
+  pgdata:
