@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import characters, stores
+from app.locale import t
 from app.models import Timer
 from app.models_game import (
     Character,
@@ -176,6 +177,16 @@ async def proceed(
             + ").",
         )
 
+    # кулдаун между событиями (ТЗ): база из config + 1с за каждые 2 ед. потраченного топлива
+    now = datetime.now(UTC)
+    if expedition.next_event_at is not None and expedition.next_event_at > now:
+        wait = int((expedition.next_event_at - now).total_seconds()) + 1
+        raise DomainError(
+            "event_cooldown",
+            f"Сканирование сектора… следующее событие через {wait}с.",
+            details={"wait_sec": wait},
+        )
+
     await _extend_queue_if_needed(session, expedition, rng)
     code = expedition.event_queue[expedition.queue_pos]
     template = await session.scalar(
@@ -187,13 +198,14 @@ async def proceed(
     if expedition.fuel_remaining < template.fuel_cost:
         await _start_return(session, character, expedition, reason="fuel_empty")
         malfunctions = int(await stores.get_param(session, "fuel_empty.malfunctions", 1))
-        return None, (
-            "Топливо исчерпано — корабль автоматически возвращается в космопорт "
-            f"(поломок: +{malfunctions})."
-        )
+        return None, t("ret_fuel_empty_note", character.lang, mal=malfunctions)
 
     expedition.fuel_remaining -= template.fuel_cost
     expedition.depth += 1
+    spent = expedition.fuel_at_start - expedition.fuel_remaining
+    base = int(await stores.get_param(session, "expedition.event_cooldown_base_sec", 10))
+    per = int(await stores.get_param(session, "expedition.event_cooldown_per_2fuel_sec", 1))
+    expedition.next_event_at = now + timedelta(seconds=base + (spent // 2) * per)
     event = ExpeditionEvent(
         expedition_id=expedition.id,
         event_template_id=template.id,
@@ -254,18 +266,18 @@ async def _apply_outcome(
             session, character, code=code, qty=qty, allow_loss=True
         )
         if given > 0:
-            effects.append(f"получено {given}× {code}")
+            effects.append(t("effect_got", character.lang, qty=given, code=code))
         if given < qty:
-            effects.append(f"инвентарь полон: потеряно {qty - given}× {code}")
+            effects.append(t("effect_lost_full", character.lang, qty=qty - given, code=code))
 
     damage = int(outcome.get("hull_damage", 0))
     if damage > 0:
         ship = await get_ship(session, character.id)
         ship.current_hull = max(0, ship.current_hull - damage)
-        effects.append(f"урон корпусу: -{damage}")
+        effects.append(t("effect_hull_damage", character.lang, damage=damage))
         if ship.current_hull == 0:
             await _apply_defeat(session, character, expedition, rng)
-            effects.append("КОРАБЛЬ ОТКАЗАЛ — отступаем в космопорт")
+            effects.append(t("effect_ship_down", character.lang))
 
     event.status = "resolved"
     event.resolution = {"outcome": outcome, "effects": effects}
@@ -408,12 +420,11 @@ async def _start_return(
     )
 
     messages = {
-        "voluntary": (
-            f"Возвращение началось. Прибытие через {delay}с. "
-            f"Топливо сохранено: {expedition.fuel_remaining}."
+        "voluntary": t(
+            "ret_started", character.lang, delay=delay, fuel=expedition.fuel_remaining
         ),
-        "fuel_empty": "Топливо исчерпано — корабль возвращается автоматически.",
-        "defeat": "Поражение. Корабль отступает в космопорт.",
+        "fuel_empty": t("ret_fuel_empty", character.lang),
+        "defeat": t("ret_defeat", character.lang),
     }
     text = messages[reason]
     if extra:
@@ -449,6 +460,8 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
     expedition = await session.get(Expedition, uuid.UUID(str(payload["expedition_id"])))
     if expedition is None or expedition.status != "returning":
         return
+    character = await session.get(Character, expedition.character_id)
+    lang = character.lang if character is not None else "ru"
     expedition.status = "completed"
     expedition.arrived_at = datetime.now(UTC)
     ship = await get_ship(session, expedition.character_id)
@@ -456,9 +469,11 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
     await stores.add_outbox(
         session,
         character_id=expedition.character_id,
-        text=(
-            f"Прибыли в космопорт. Экспедиция завершена (глубина {expedition.depth}, "
-            f"топливо осталось {expedition.fuel_remaining})."
+        text=t(
+            "arrived",
+            lang,
+            depth=expedition.depth,
+            fuel=expedition.fuel_remaining,
         ),
     )
     await session.flush()
@@ -467,24 +482,29 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
 # --- статус --------------------------------------------------------------------
 
 
-def describe_event(event: ExpeditionEvent, *, low_max: int = 3, high_min: int = 7) -> str:
+def describe_event(
+    event: ExpeditionEvent, *, lang: str = "ru", low_max: int = 3, high_min: int = 7
+) -> str:
+    from app.locale import t
+
     snap = event.snapshot
     label = danger_label(
         int(snap.get("danger_min", 1)), int(snap.get("danger_max", 1)),
         low_max=low_max, high_min=high_min,
     )
+    label = t(f"danger_{label}", lang)
     lines = [
-        f"Событие «{snap.get('name', '?')}» (опасность: {label})",
+        t("event_title", lang, name=snap.get("name", "?"), danger=label),
         snap.get("description", ""),
     ]
     if event.status == "offered" and snap.get("kind") == "interactive":
         for choice in snap.get("script", {}).get("choices", []):
             lines.append(f"{choice.get('key')}. {choice.get('text')}")
         if snap.get("can_refuse"):
-            lines.append("Отказ: decline")
+            lines.append(t("event_refuse", lang))
     elif event.status == "resolved":
         outcome = (event.resolution or {}).get("outcome", {})
-        lines.append(f"Исход: {outcome.get('message', '')}")
+        lines.append(t("event_outcome", lang, message=outcome.get("message", "")))
         for effect in (event.resolution or {}).get("effects", []):
             lines.append(f"— {effect}")
     return "\n".join(line for line in lines if line)

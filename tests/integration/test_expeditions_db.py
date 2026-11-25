@@ -6,7 +6,7 @@
 """
 import random
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
@@ -42,6 +42,12 @@ async def _outbox_texts(session, character) -> list[str]:
     return [r.text for r in rows]
 
 
+
+async def _no_cooldown(session, expedition) -> None:
+    """Снять кулдаун между событиями (тесты не ждут реальные 10+ секунд)."""
+    expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+
 @requires_db
 async def test_launch_creates_expedition_with_queue(session, seeded):
     character = await _character(session, seeded, fuel=50)
@@ -76,6 +82,7 @@ async def test_go_spends_fuel_and_resolves_automatic_event(session, seeded):
     # очередь рандомна: крутим go, пока не встретим автоматическое событие
     for _ in range(20):
         event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
+        await _no_cooldown(session, expedition)
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -91,12 +98,13 @@ async def test_go_spends_fuel_and_resolves_automatic_event(session, seeded):
 @requires_db
 async def test_interactive_event_choice_applies_grants(session, seeded):
     character = await _character(session, seeded, fuel=50)
-    await expeditions.launch_expedition(session, character)
+    expedition = await expeditions.launch_expedition(session, character)
 
     # ищем интерактивное событие, перебирая go/decline
     event = None
     for _ in range(25):
         event, note = await expeditions.proceed(session, character, rng=random.Random(7))
+        await _no_cooldown(session, expedition)
         if event is None:
             pytest.fail("топливо кончилось раньше, чем нашлось интерактивное событие")
         if event.snapshot["kind"] == "interactive":
@@ -121,10 +129,11 @@ async def test_interactive_event_choice_applies_grants(session, seeded):
 @requires_db
 async def test_decline_refusable_event_and_block_non_refusable(session, seeded):
     character = await _character(session, seeded, fuel=50)
-    await expeditions.launch_expedition(session, character)
+    expedition = await expeditions.launch_expedition(session, character)
 
     for _ in range(25):
         event, _ = await expeditions.proceed(session, character, rng=random.Random(11))
+        await _no_cooldown(session, expedition)
         if event is None:
             pytest.fail("топливо кончилось раньше времени")
         if event.snapshot["kind"] == "interactive":
@@ -146,6 +155,7 @@ async def test_voluntary_return_scenario(session, seeded):
     # во время активного события вернуться нельзя (ТЗ)
     for _ in range(25):
         event, _ = await expeditions.proceed(session, character, rng=random.Random(5))
+        await _no_cooldown(session, expedition)
         if event is None:
             pytest.fail("топливо кончилось раньше времени")
         if event.snapshot["kind"] == "interactive":
@@ -202,6 +212,10 @@ async def test_fuel_empty_return_scenario(session, seeded):
     note = ""
     for _ in range(30):
         event, note = await expeditions.proceed(session, character, rng=random.Random(2))
+        ongoing = await expeditions.get_ongoing_expedition(session, character.id)
+        if ongoing is not None:
+            ongoing.next_event_at = None
+            await session.flush()
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -274,6 +288,7 @@ async def test_expedition_extends_queue_when_exhausted(session, seeded):
         if expedition.status != "active":
             break
         event, _ = await expeditions.proceed(session, character, rng=random.Random(9))
+        await _no_cooldown(session, expedition)
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -296,9 +311,29 @@ async def test_queue_never_exceeds_unique_constraint(session, seeded):
         if expedition.status != "active":
             break
         event, _ = await expeditions.proceed(session, character, rng=rng)
+        await _no_cooldown(session, expedition)
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
             await expeditions.decline_event(session, character)
             await session.refresh(expedition)
     assert expedition.event_queue.count("trinium_vein") <= 1
+
+
+@requires_db
+async def test_event_cooldown_between_go(session, seeded):
+    """ТЗ: задержка между событиями — базовая + 1с за каждые 2 ед. потраченного топлива."""
+    character = await _character(session, seeded, fuel=50)
+    expedition = await expeditions.launch_expedition(session, character)
+
+    event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
+    if event.snapshot["kind"] == "interactive":
+        await expeditions.decline_event(session, character)
+    # повторный go сразу → кулдаун (база 10с + потраченное топливо // 2)
+    with pytest.raises(DomainError) as exc_info:
+        await expeditions.proceed(session, character, rng=random.Random(1))
+    assert exc_info.value.code == "event_cooldown"
+
+    await _no_cooldown(session, expedition)
+    event, _ = await expeditions.proceed(session, character, rng=random.Random(2))
+    assert event is not None  # после ожидания go снова работает

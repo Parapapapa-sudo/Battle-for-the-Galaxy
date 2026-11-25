@@ -87,10 +87,12 @@ async def test_sync_command_via_router(session, seeded, sessions):
         platform="console", platform_user_id=identity.platform_user_id,
         text="sync", idempotency_key=f"sync-{uuid.uuid4()}",
     )
-    assert "exp_return_arrival" in result.message
+    # роутер сам догоняет просроченные таймеры перед командой (auto-sync) —
+    # поэтому sync либо отчитался о сработавшем таймере, либо видит чистоту
+    assert "exp_return_arrival" in result.message or "норме" in result.message
 
     expedition = await expeditions.get_ongoing_expedition(session, character.id)
-    assert expedition is None  # завершилась
+    assert expedition is None  # завершилась (auto-sync или sync)
 
 
 @requires_db

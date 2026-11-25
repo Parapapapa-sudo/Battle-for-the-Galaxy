@@ -83,6 +83,10 @@ async def test_interactive_event_shows_choice_buttons(session, seeded):
     await expeditions.launch_expedition(session, character)
     for _ in range(40):
         event, _ = await expeditions.proceed(session, character, rng=random.Random(3))
+        ongoing = await expeditions.get_ongoing_expedition(session, character.id)
+        if ongoing is not None:
+            ongoing.next_event_at = None
+            await session.flush()
         if event is None:
             pytest.fail("топливо кончилось раньше события с выбором")
         if event.snapshot["kind"] == "interactive":

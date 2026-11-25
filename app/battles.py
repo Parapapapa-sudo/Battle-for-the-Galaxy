@@ -19,6 +19,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import characters, expeditions, stores
+from app.locale import t
 from app.models_game import (
     Battle,
     BattleTurn,
@@ -157,6 +158,8 @@ async def _enemy_round(
     battle: Battle,
     loadout: EnemyLoadout,
     rng: random.Random,
+    *,
+    lang: str = "ru",
 ) -> str:
     """Ход противника; возвращает краткий итог."""
     state = battle.state
@@ -175,10 +178,12 @@ async def _enemy_round(
         cooldowns[action["code"]] = turn_no + int(action["cooldown"])
     state["cooldowns"] = cooldowns
 
-    summary = (
-        f"{loadout.name} использует «{action.get('name', 'атака')}»" if action["kind"] == "ability"
-        else f"{loadout.name} атакует"
-    ) + f": -{damage} прочности."
+    if action["kind"] == "ability":
+        summary = t(
+            "sum_enemy_ability", lang, name=loadout.name, ability=action.get("name", ""), damage=damage
+        )
+    else:
+        summary = t("sum_enemy_attack", lang, name=loadout.name, damage=damage)
     await _write_turn(
         session, battle, actor="enemy", action=action, summary=summary,
         log=[f"базовый урон {base}", f"множитель {action.get('damage_mult', 1.0)}", f"итог {damage}"],
@@ -194,6 +199,7 @@ async def _finish_win(
     rng: random.Random,
 ) -> str:
     """Победа (ТЗ): награды атомарно, опыт только за победу."""
+    lang = character.lang
     battle.status = "won"
     ship = await expeditions.get_ship(session, character.id)
     ship.status = "expedition" if battle.expedition_id else "dock"
@@ -225,9 +231,8 @@ async def _finish_win(
             gained.append(f"{given}× {grant['code']}")
 
     character.xp_pool += loadout.xp
-    summary = f"Победа! +{loadout.xp} опыта."
-    if gained:
-        summary += " Добыча: " + ", ".join(gained) + "."
+    loot = t("sum_victory_loot", lang, list=", ".join(gained)) if gained else ""
+    summary = t("sum_victory", lang, xp=loadout.xp, loot=loot)
     await _write_turn(
         session, battle, actor="player", action={"kind": "victory"},
         summary=summary, log=["награды начислены атомарно с победой"],
@@ -243,8 +248,9 @@ async def _finish_loss(
     rng: random.Random,
 ) -> str:
     """Поражение (ТЗ): автовозврат, поломки, потеря доли добычи экспедиции."""
+    lang = character.lang
     battle.status = "lost"
-    summary = "Корабль выведен из строя — отступаем в космопорт."
+    summary = t("sum_defeat", lang)
     await _write_turn(
         session, battle, actor="enemy", action={"kind": "defeat"},
         summary=summary, log=["прочность игрока достигла нуля"],
@@ -263,13 +269,15 @@ async def _player_attack_round(
     battle: Battle,
     loadout: EnemyLoadout,
     rng: random.Random,
+    *,
+    lang: str = "ru",
 ) -> str:
     state = battle.state
     spread = int(await stores.get_param(session, "combat.damage_spread_pct", 10))
     base = roll_damage(int(battle.player_snapshot.get("attack", 5)), rng, spread_pct=spread)
     damage = apply_incoming_modifiers(base, loadout.passives, loadout.weaknesses)
     state["enemy_hull"] = max(0, int(state.get("enemy_hull", loadout.hull)) - damage)
-    summary = f"Ваш удар: -{damage} прочности противнику."
+    summary = t("sum_player_attack", lang, damage=damage)
     await _write_turn(
         session, battle, actor="player", action={"kind": "attack"}, summary=summary,
         log=[f"базовая атака {base}", f"после пассивов/слабостей {damage}"],
@@ -289,11 +297,11 @@ async def player_attack(
     battle = await _require_active_battle(session, character)
     loadout = await _battle_loadout(session, battle)
 
-    parts = [await _player_attack_round(session, character, battle, loadout, rng)]
+    parts = [await _player_attack_round(session, character, battle, loadout, rng, lang=character.lang)]
     if int(battle.state["enemy_hull"]) <= 0:
         parts.append(await _finish_win(session, character, battle, loadout, rng))
     else:
-        parts.append(await _enemy_round(session, character, battle, loadout, rng))
+        parts.append(await _enemy_round(session, character, battle, loadout, rng, lang=character.lang))
         ship = await expeditions.get_ship(session, character.id)
         if ship.current_hull <= 0:
             parts.append(await _finish_loss(session, character, battle, rng))
@@ -318,6 +326,7 @@ async def player_use_item(
     if int(state.get("consumables_used_turn", 0)) >= limit:
         raise DomainError("consumable_limit", f"Лимит расходников за ход: {limit}.")
 
+    lang = character.lang
     template = await session.scalar(sa.select(ItemTemplate).where(ItemTemplate.code == code))
     if template is None:
         raise DomainError("unknown_item", f"Неизвестный предмет: {code}")
@@ -331,9 +340,9 @@ async def player_use_item(
         cap = max_hull(ship.base_max_hull, ship.malfunctions)
         before = ship.current_hull
         ship.current_hull = min(cap, before + heal)
-        summary = f"Использован {template.name}: +{ship.current_hull - before} прочности."
+        summary = t("sum_use_heal", lang, name=template.name, healed=ship.current_hull - before)
     else:
-        summary = f"Использован {template.name}."
+        summary = t("sum_use_plain", lang, name=template.name)
     state["consumables_used_turn"] = int(state.get("consumables_used_turn", 0)) + 1
     await _write_turn(
         session, battle, actor="player", action={"kind": "use", "code": code},
@@ -341,7 +350,7 @@ async def player_use_item(
     )
 
     # расходник не отнимает ход: противник отвечает
-    parts_enemy = await _enemy_round(session, character, battle, loadout, rng)
+    parts_enemy = await _enemy_round(session, character, battle, loadout, rng, lang=character.lang)
     ship = await expeditions.get_ship(session, character.id)
     if ship.current_hull <= 0:
         await _finish_loss(session, character, battle, rng)
@@ -357,6 +366,7 @@ async def player_retreat(
 ) -> Battle:
     """Отступление (ТЗ): одна попытка за бой; успех = противник исчезает, наград нет."""
     rng = rng or random.Random()
+    lang = character.lang
     battle = await _require_active_battle(session, character)
     if battle.retreat_used:
         raise DomainError("retreat_spent", "Попытка отступления уже израсходована.")
@@ -376,12 +386,12 @@ async def player_retreat(
     battle.retreat_used = True
 
     if not result.success:
-        summary = "Отступление не удалось — противник перехватывает вас!"
+        summary = t("sum_retreat_fail", lang)
         await _write_turn(
             session, battle, actor="player", action={"kind": "retreat", "success": False},
             summary=summary, log=["попытка отступления израсходована"],
         )
-        enemy_summary = await _enemy_round(session, character, battle, loadout, rng)
+        enemy_summary = await _enemy_round(session, character, battle, loadout, rng, lang=character.lang)
         ship = await expeditions.get_ship(session, character.id)
         if ship.current_hull <= 0:
             await _finish_loss(session, character, battle, rng)
@@ -393,13 +403,13 @@ async def player_retreat(
 
     battle.status = "retreated"
     ship = await expeditions.get_ship(session, character.id)
-    notes = ["Вы уходите из боя. Награда за победу не выдаётся."]
+    notes = [t("sum_retreat_ok", lang)]
     if result.damage > 0:
         ship.current_hull = max(1, ship.current_hull - result.damage)
-        notes.append(f"Прощальный залп: -{result.damage} прочности.")
+        notes.append(t("sum_retreat_damage", lang, damage=result.damage))
     if result.malfunction:
         ship.malfunctions += 1
-        notes.append("Получена поломка.")
+        notes.append(t("sum_retreat_mal", lang))
     ship.status = "expedition" if battle.expedition_id else "dock"
     await _write_turn(
         session, battle, actor="player", action={"kind": "retreat", "success": True},
@@ -452,7 +462,7 @@ async def player_ability(
     if int(state["enemy_hull"]) <= 0:
         await _finish_win(session, character, battle, loadout, rng)
     else:
-        await _enemy_round(session, character, battle, loadout, rng)
+        await _enemy_round(session, character, battle, loadout, rng, lang=character.lang)
         ship = await expeditions.get_ship(session, character.id)
         if ship.current_hull <= 0:
             await _finish_loss(session, character, battle, rng)
@@ -478,7 +488,7 @@ async def _battle_loadout(session: AsyncSession, battle: Battle) -> EnemyLoadout
 # --- представление --------------------------------------------------------------
 
 
-async def describe_battle(session: AsyncSession, battle: Battle) -> str:
+async def describe_battle(session: AsyncSession, battle: Battle, *, lang: str = "ru") -> str:
     snap = battle.enemy_snapshot
     state = battle.state
     ship = await expeditions.get_ship(session, battle.character_id)
@@ -489,20 +499,24 @@ async def describe_battle(session: AsyncSession, battle: Battle) -> str:
     passives = snap.get("passives") or {}
     weaknesses = snap.get("weaknesses") or {}
     lines = [
-        f"БОЙ: {snap.get('name', '?')} [{snap.get('category', '?')}]",
-        f"Противник: {int(state.get('enemy_hull', 0))}/{int(snap.get('max_hull', 0))}",
-        f"Ваш корабль: {ship.current_hull}/{cap} (поломки: {ship.malfunctions})",
-        f"Ход: {int(state.get('turn_no', 1))}",
+        t("battle_card", lang, name=snap.get("name", "?"), category=snap.get("category", "?")),
+        t("battle_enemy", lang, cur=int(state.get("enemy_hull", 0)), max=int(snap.get("max_hull", 0))),
+        t("battle_you", lang, hull=ship.current_hull, max=cap, mal=ship.malfunctions),
+        t("battle_turn", lang, n=int(state.get("turn_no", 1))),
     ]
     if passives:
-        lines.append(f"Особенности противника: {', '.join(passives)}")
+        lines.append(t("battle_passives", lang, list=", ".join(passives)))
     if weaknesses:
-        lines.append(f"Замечены слабости: {', '.join(weaknesses)}")
+        lines.append(t("battle_weaknesses", lang, list=", ".join(weaknesses)))
     if not battle.retreat_used and battle.status == "active":
         lines.append(
-            f"Отступление: попытка 1/1, шанс {chance_label(retreat_pct, low_max=low, high_min=high)}."
+            t(
+                "battle_retreat_hint",
+                lang,
+                label=t(f"chance_{chance_label(retreat_pct, low_max=low, high_min=high)}", lang),
+            )
         )
-    lines.append("Команды: attack | use <код> | retreat")
+    lines.append(t("battle_cmds", lang))
     return "\n".join(lines)
 
 

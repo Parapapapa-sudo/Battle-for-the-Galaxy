@@ -67,6 +67,8 @@ async def test_tutorial_chain_progression(session, seeded, bus):
     # шаг 2: два разрешённых события (отклонения не считаются — считаем resolved)
     for attempt in range(40):
         event, _ = await expeditions.proceed(session, character, rng=random.Random(3))
+        expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.flush()
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -84,11 +86,13 @@ async def test_tutorial_chain_progression(session, seeded, bus):
                 session, character, str(chosen["key"]), rng=random.Random(1)
             )
             if battle_choice is not None:
-                break  # бой начался — tutorial_2 можно добрать после победы
+                break  # бой начался — tutorial_2 добираем после победы
         if attempt + 1 >= 2:
             break
     active = await quests.active_quests(session, character)
-    assert active and active[0][1].code == "tutorial_3"
+    # tutorial_3 — после двух событий; но засада пиратов могла начать бой на шаге 2
+    # раньше второго события — тогда добор произойдёт после победы
+    assert active and active[0][1].code in ("tutorial_2", "tutorial_3")
 
     # шаг 3: победа в бою (засада могла начать бой уже на шаге 2)
     battle = await battles.get_active_battle(session, character.id)
@@ -102,6 +106,26 @@ async def test_tutorial_chain_progression(session, seeded, bus):
         if battle.status != "active":
             break
     assert battle.status == "won"
+
+    # если бой начался на шаге 2 — добираем недостающие события для tutorial_2
+    for _ in range(10):
+        active = await quests.active_quests(session, character)
+        if not active or active[0][1].code != "tutorial_2":
+            break
+        event, _ = await expeditions.proceed(session, character, rng=random.Random(8))
+        expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.flush()
+        if event is None:
+            break
+        if event.snapshot["kind"] == "interactive":
+            safe = next(
+                (c for c in event.snapshot["script"]["choices"] if "battle" not in (c.get("outcome") or {})),
+                event.snapshot["script"]["choices"][-1],
+            )
+            await expeditions.resolve_choice(
+                session, character, str(safe["key"]), rng=random.Random(1)
+            )
+
     active = await quests.active_quests(session, character)
     assert active and active[0][1].code == "story_1"
 

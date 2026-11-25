@@ -126,7 +126,15 @@ async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
         text="launch", idempotency_key=_key(),
     )
 
-    # ищем интерактивное событие
+    # ищем интерактивное событие (кулдаун между событиями снимаем напрямую)
+    from app.expeditions import get_ongoing_expedition
+
+    account, _ = await characters.get_or_create_account(
+        session, platform="console", platform_user_id=user
+    )
+    character = await characters.get_active_character(session, account.id)
+    assert character is not None
+
     for _ in range(40):
         r = await route_text_command(
             bus, sessions, platform="console", platform_user_id=user,
@@ -138,6 +146,10 @@ async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
             bus, sessions, platform="console", platform_user_id=user,
             text="decline", idempotency_key=_key(),
         )
+        expedition = await get_ongoing_expedition(session, character.id)
+        if expedition is not None:
+            expedition.next_event_at = None
+            await session.flush()
     else:
         pytest.fail("интерактивное событие не встретилось")
 

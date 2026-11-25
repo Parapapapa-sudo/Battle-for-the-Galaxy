@@ -51,6 +51,13 @@ async def route_text_command(
         )
         character = await characters.get_active_character(session, account.id)
 
+        # автосинхронизация таймеров (прибытие, крафт…) при ЛЮБОЙ команде —
+        # без worker'а прогресс не зависает; эффект идемпотентен.
+        if character is not None:
+            from app.timer_handlers import sync_character_timers
+
+            await sync_character_timers(session, character.id)
+
         try:
             if character is not None and cmd in CHARACTER_COMMANDS:
                 return await bus.execute(

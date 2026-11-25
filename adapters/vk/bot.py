@@ -6,12 +6,13 @@
 """
 import asyncio
 import contextlib
+import json
 import signal
 from typing import Any
 
 import structlog
 
-from adapters.vk.api import VkApi, VkSender
+from adapters.vk.api import VkApi, VkRateLimited, VkSender
 from app import characters, db
 from app.bus import CommandBus
 from app.config import get_settings
@@ -101,6 +102,22 @@ async def _keyboard_for_user(platform_user_id: str) -> dict[str, Any]:  # keyboa
         return (await keyboard_for_character(session, character.id)) or (await keyboard_for_new_user())
 
 
+async def _send_with_retry(
+    api: VkApi, user_id: int, text: str, keyboard: dict[str, Any] | None, *, attempts: int = 4
+) -> None:
+    """Прямые ответы обходят outbox-пейсинг — при лимите VK (20 msg/с) ретраим с бэкоффом."""
+    delay = 1.0
+    for attempt in range(attempts):
+        try:
+            await api.send_message(user_id, text, keyboard=keyboard)
+            return
+        except VkRateLimited:
+            if attempt == attempts - 1:
+                raise
+            await asyncio.sleep(delay)
+            delay *= 2
+
+
 async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) -> None:
     if update.get("type") != "message_new":
         return
@@ -108,6 +125,15 @@ async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) ->
     message = obj.get("message", obj)  # схема v5.199: object.message
     user_id = message.get("from_id")
     text = (message.get("text") or "").strip()
+    # payload кнопки (JSON с командой) имеет приоритет: label локализован, команда — нет
+    raw_payload = message.get("payload")
+    if raw_payload:
+        try:
+            payload_cmd = json.loads(raw_payload).get("cmd")
+            if payload_cmd:
+                text = str(payload_cmd).strip()
+        except (ValueError, AttributeError):
+            pass
     if not user_id or not text:
         return
     key = f"vk:{user_id}:{message.get('conversation_message_id', message.get('id'))}"
@@ -121,10 +147,10 @@ async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) ->
             idempotency_key=key,
         )
         keyboard = await _keyboard_for_user(str(user_id))
-        await api.send_message(int(user_id), result.message[:4000], keyboard=keyboard)
+        await _send_with_retry(api, int(user_id), result.message[:4000], keyboard)
     except DomainError as exc:
         keyboard = await _keyboard_for_user(str(user_id))
-        await api.send_message(int(user_id), exc.message[:4000], keyboard=keyboard)
+        await _send_with_retry(api, int(user_id), exc.message[:4000], keyboard)
     except Exception:  # noqa: BLE001 — одно плохое обновление не останавливает бота
         log.exception("vk_update_error", update=update)
 

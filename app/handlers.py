@@ -1,8 +1,8 @@
-"""Реестр игровых команд этапа 1 (общий для VK- и консольного адаптера).
+"""Реестр игровых команд (общий для VK- и консольного адаптера). Все тексты — i18n.
 
 Разделение скоупов (ТЗ: последовательность команд):
 - account-команды (start/factions) — до создания персонажа, lock на аккаунт;
-- character-команды (me/inv/ship) — после создания, lock на персонажа.
+- character-команды — после создания, lock на персонажа, язык из characters.lang.
 """
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.quests as quests_mod
 from app import battles, characters, crafting, economy, expeditions, market, modules, stores
 from app.bus import CommandContext, CommandResult
+from app.locale import t
 from app.models_game import (
     Battle,
     Character,
@@ -26,10 +27,7 @@ from app.models_game import (
 from core.errors import DomainError
 from core.hull import max_hull
 
-USAGE_NO_CHARACTER = (
-    "У вас ещё нет персонажа. Создайте: start <имя> <код_фракции>. "
-    "Список фракций: factions"
-)
+USAGE_NO_CHARACTER = t("usage_no_character")
 
 
 # --- account scope ------------------------------------------------------------
@@ -37,10 +35,10 @@ USAGE_NO_CHARACTER = (
 async def cmd_factions(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     factions = await characters.list_factions(session)
     if not factions:
-        return CommandResult(message="Фракции пока не созданы (контент не засеян).")
+        return CommandResult(message=t("factions_empty"))
     lines = [f"{f.code} — {f.name}" for f in factions]
     return CommandResult(
-        message="Фракции:\n" + "\n".join(lines),
+        message=t("factions_title") + "\n" + "\n".join(lines),
         data={"factions": [{"code": f.code, "name": f.name} for f in factions]},
     )
 
@@ -49,8 +47,6 @@ async def cmd_start(session: AsyncSession, ctx: CommandContext, args: dict[str, 
     assert ctx.account_id is not None
     text = str(args.get("text", "")).strip()
 
-    # Разбор: "Иван azimuth" (код фракции — последний токен, если он известен),
-    # иначе вся строка — имя и просим выбрать фракцию.
     name, faction_code = text, None
     parts = text.rsplit(maxsplit=1)
     if len(parts) == 2 and await characters.get_faction_by_code(session, parts[1]):
@@ -58,18 +54,13 @@ async def cmd_start(session: AsyncSession, ctx: CommandContext, args: dict[str, 
 
     if not name:
         factions = await characters.list_factions(session)
-        codes = ", ".join(f.code for f in factions)
-        return CommandResult(
-            message=(
-                "Создание персонажа: start <имя> <код_фракции>.\n"
-                f"Доступные фракции: {codes or 'нет (контент не засеян)'}"
-            )
-        )
+        codes = ", ".join(f.code for f in factions) or t("start_no_factions")
+        return CommandResult(message=t("start_usage", codes=codes))
     if faction_code is None:
         factions = await characters.list_factions(session)
         lines = [f"{f.code} — {f.name}" for f in factions]
         return CommandResult(
-            message=f"Выберите фракцию для «{name}»:\n" + "\n".join(lines),
+            message=t("start_choose", name=name, factions="\n".join(lines)),
             data={"need_faction": True, "name": name},
         )
 
@@ -78,10 +69,10 @@ async def cmd_start(session: AsyncSession, ctx: CommandContext, args: dict[str, 
     )
     faction = await characters.get_faction_by_code(session, faction_code)
     return CommandResult(
-        message=(
-            f"Персонаж «{character.name}» создан. Фракция: {faction.name if faction else faction_code}.\n"
-            "Обучение начинается с первой экспедиции (этап 3).\n"
-            "Команды: me — профиль, inv — инвентарь, ship — корабль."
+        message=t(
+            "start_created",
+            name=character.name,
+            faction=faction.name if faction else faction_code,
         ),
         data={"character_id": str(character.id)},
     )
@@ -96,6 +87,7 @@ async def _load(session: AsyncSession, ctx: CommandContext) -> Character:
 
 async def cmd_me(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     faction_row = await session.get(Faction, character.faction_id)
     rep = await session.scalar(
         sa.select(Reputation).where(
@@ -103,10 +95,13 @@ async def cmd_me(session: AsyncSession, ctx: CommandContext, args: dict[str, Any
         )
     )
     return CommandResult(
-        message=(
-            f"{character.name} — {faction_row.name if faction_row else '?'}\n"
-            f"Репутация: {rep.value if rep else 0}\n"
-            f"Опыт (пул): {character.xp_pool}"
+        message=t(
+            "profile",
+            lang,
+            name=character.name,
+            faction=faction_row.name if faction_row else "?",
+            rep=rep.value if rep else 0,
+            xp=character.xp_pool,
         ),
         data={
             "name": character.name,
@@ -119,29 +114,35 @@ async def cmd_me(session: AsyncSession, ctx: CommandContext, args: dict[str, Any
 
 async def cmd_inv(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     kind = str(args.get("kind", "ship"))
     if kind not in ("ship", "warehouse", "waiting"):
-        raise DomainError("bad_kind", "Раздел: ship | warehouse | waiting")
+        raise DomainError("bad_kind", t("inv_bad_kind", lang))
     inventory, rows = await characters.list_inventory(session, character.id, kind)
     if not rows:
-        return CommandResult(message="Инвентарь пуст.")
+        return CommandResult(message=t("inv_empty", lang))
     limit = inventory.size_limit if inventory.size_limit is not None else "∞"
-    lines = [f"[{r.qty}×] {r.name} ({r.code})" for r in rows]
+    lines = [t("inv_item", lang, qty=r.qty, name=r.name, code=r.code) for r in rows]
     return CommandResult(
-        message=f"Инвентарь ({kind}, {len(rows)}/{limit}):\n" + "\n".join(lines),
+        message=t("inv_header", lang, kind=kind, used=len(rows), limit=limit) + "\n" + "\n".join(lines),
         data={"kind": kind, "items": [r.__dict__ for r in rows]},
     )
 
 
 async def cmd_ship(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     ship, template = await characters.get_ship(session, character.id)
     return CommandResult(
-        message=(
-            f"{template.name}\n"
-            f"Прочность: {ship.current_hull}/{max_hull(ship.base_max_hull, ship.malfunctions)} "
-            f"(поломки: {ship.malfunctions})\n"
-            f"Топливо: {ship.fuel}\nСтатус: {ship.status}"
+        message=t(
+            "ship_card",
+            lang,
+            name=template.name,
+            hull=ship.current_hull,
+            max=max_hull(ship.base_max_hull, ship.malfunctions),
+            mal=ship.malfunctions,
+            fuel=ship.fuel,
+            status=ship.status,
         ),
         data={
             "hull": ship.current_hull,
@@ -158,19 +159,23 @@ async def cmd_ship(session: AsyncSession, ctx: CommandContext, args: dict[str, A
 
 async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     expedition = await expeditions.get_ongoing_expedition(session, character.id)
     if expedition is None:
-        return CommandResult(message="Экспедиция не начата. Команда: launch")
+        return CommandResult(message=t("exp_not_started", lang))
     if expedition.status == "returning":
         return CommandResult(
-            message=(
-                f"Возвращение в космопорт ({expedition.return_reason}). "
-                f"Глубина: {expedition.depth}. Осталось топлива: {expedition.fuel_remaining}."
+            message=t(
+                "exp_returning",
+                lang,
+                reason=expedition.return_reason,
+                depth=expedition.depth,
+                fuel=expedition.fuel_remaining,
             )
         )
     offered = await expeditions._current_offered_event(session, expedition)
     if offered is not None:
-        return CommandResult(message=expeditions.describe_event(offered))
+        return CommandResult(message=expeditions.describe_event(offered, lang=lang))
     low = int(await stores.get_param(session, "danger.low_max", 3))
     high = int(await stores.get_param(session, "danger.high_min", 7))
     last = await session.scalar(
@@ -179,13 +184,16 @@ async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, An
         .order_by(ExpeditionEvent.seq.desc())
         .limit(1)
     )
-    text = (
-        f"Экспедиция активна. Глубина: {expedition.depth}. "
-        f"Топливо: {expedition.fuel_remaining}/{expedition.fuel_at_start}.\n"
+    text = t(
+        "exp_active",
+        lang,
+        depth=expedition.depth,
+        fuel=expedition.fuel_remaining,
+        start=expedition.fuel_at_start,
     )
     if last is not None and last.status == "resolved":
-        text += expeditions.describe_event(last, low_max=low, high_min=high) + "\n"
-    text += "Команда: go — идти дальше, return — вернуться в космопорт."
+        text += "\n" + expeditions.describe_event(last, lang=lang, low_max=low, high_min=high)
+    text += "\n" + t("exp_hint", lang)
     return CommandResult(message=text)
 
 
@@ -193,22 +201,20 @@ async def cmd_launch(session: AsyncSession, ctx: CommandContext, args: dict[str,
     character = await _load(session, ctx)
     expedition = await expeditions.launch_expedition(session, character)
     return CommandResult(
-        message=(
-            f"Экспедиция началась! Топливо: {expedition.fuel_remaining}. "
-            "Команда go — двигаться дальше."
-        ),
+        message=t("launch_started", character.lang, fuel=expedition.fuel_remaining),
         data={"expedition_id": str(expedition.id)},
     )
 
 
 async def cmd_go(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     event, note = await expeditions.proceed(session, character)
     if event is None:
-        return CommandResult(message=note)  # автовозврат по топливу (зафиксирован)
+        return CommandResult(message=note)
     low = int(await stores.get_param(session, "danger.low_max", 3))
     high = int(await stores.get_param(session, "danger.high_min", 7))
-    text = expeditions.describe_event(event, low_max=low, high_min=high)
+    text = expeditions.describe_event(event, lang=lang, low_max=low, high_min=high)
     if note:
         text = note + "\n" + text
     return CommandResult(message=text)
@@ -218,41 +224,39 @@ async def cmd_choice(session: AsyncSession, ctx: CommandContext, args: dict[str,
     character = await _load(session, ctx)
     key = str(args.get("key", "")).strip()
     if not key:
-        raise DomainError("bad_choice", "Укажите вариант: choice <n>")
+        raise DomainError("bad_choice", t("choice_missing_arg", character.lang))
     event = await expeditions.resolve_choice(session, character, key)
-    return CommandResult(message=expeditions.describe_event(event))
+    return CommandResult(message=expeditions.describe_event(event, lang=character.lang))
 
 
 async def cmd_decline(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     short_id = str(args.get("id", "")).strip()
     if short_id:
-        # отказ от входящей передачи (этап 7)
         await economy.reject_transfer(session, character, short_id)
-        return CommandResult(message="Передача отклонена. Активы отправителю возвращены.")
+        return CommandResult(message=t("decline_transfer", lang))
     event = await expeditions.decline_event(session, character)
     return CommandResult(
-        message=f"Отказ от события «{event.snapshot.get('name', '?')}». Команда go — идти дальше."
+        message=t("decline_event", lang, name=event.snapshot.get("name", "?"))
     )
 
 
 async def cmd_return(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     await expeditions.request_return(session, character)
-    return CommandResult(
-        message="Возвращение началось. Сообщение о прибытии придёт автоматически."
-    )
+    return CommandResult(message=t("return_started", character.lang))
 
 
 # --- этап 4: бой -----------------------------------------------------------------
 
 
 async def _battle_message(
-    session: AsyncSession, battle: Battle, *, header: bool = True
+    session: AsyncSession, battle: Battle, *, header: bool = True, lang: str = "ru"
 ) -> str:
     lines: list[str] = []
     if header:
-        lines.append(await battles.describe_battle(session, battle))
+        lines.append(await battles.describe_battle(session, battle, lang=lang))
     turns = await battles.battle_journal(session, battle, limit=3)
     for turn in turns:
         lines.append(f"[{turn.actor}] {turn.summary}")
@@ -262,43 +266,44 @@ async def _battle_message(
 async def cmd_attack(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     battle = await battles.player_attack(session, character)
-    return CommandResult(message=await _battle_message(session, battle))
+    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
 
 
 async def cmd_use(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     code = str(args.get("code", "")).strip()
     if not code:
-        raise DomainError("no_item", "Укажите предмет: use <код>")
+        raise DomainError("no_item", t("craft_bad", character.lang))
     battle = await battles.player_use_item(session, character, code)
-    return CommandResult(message=await _battle_message(session, battle))
+    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
 
 
 async def cmd_retreat(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     battle = await battles.player_retreat(session, character)
-    return CommandResult(message=await _battle_message(session, battle))
+    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
 
 
 async def cmd_battle(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     battle = await battles.get_active_battle(session, character.id)
     if battle is None:
-        return CommandResult(message="Нет активного боя.")
-    return CommandResult(message=await _battle_message(session, battle))
+        return CommandResult(message=t("battle_none", character.lang))
+    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
 
 
 async def cmd_battle_log(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     battle = await battles.get_active_battle(session, character.id)
     if battle is None:
-        return CommandResult(message="Нет активного боя.")
+        return CommandResult(message=t("battle_none", lang))
     turns = await battles.battle_journal(session, battle, limit=10)
-    lines = [f"— ход {t.turn_no} ({t.actor}): {t.summary}" for t in turns]
-    for t in turns:
-        for entry in t.log:
-            lines.append(f"    · {entry}")
-    return CommandResult(message="Боевой журнал:\n" + "\n".join(lines))
+    lines = [t("blog_turn", lang, no=tr.turn_no, actor=tr.actor, summary=tr.summary) for tr in turns]
+    for tr in turns:
+        for entry in tr.log:
+            lines.append(t("blog_detail", lang, entry=entry))
+    return CommandResult(message=t("blog_header", lang) + "\n" + "\n".join(lines))
 
 
 # --- этап 5: модули и развитие ----------------------------------------------------
@@ -306,22 +311,36 @@ async def cmd_battle_log(session: AsyncSession, ctx: CommandContext, args: dict[
 
 async def cmd_mods(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     mods = await modules.list_modules(session, character)
     if not mods:
-        return CommandResult(message="У вас нет модулей.")
-    lines = [f"Опыт (пул): {character.xp_pool}. Сбросов сборки: {character.build_resets}."]
+        return CommandResult(message=t("mods_empty", lang))
+    lines = [t("mods_header", lang, xp=character.xp_pool, resets=character.build_resets)]
     for m in mods:
-        status = f"слот {m['slot']}" if m["installed"] else "в инвентаре"
+        status = (
+            t("mods_status_slot", lang, slot=m["slot"])
+            if m["installed"]
+            else t("mods_status_inv", lang)
+        )
         extra = ""
         if m["attack_bonus"]:
-            extra = f", атака +{m['attack_bonus']}"
+            extra = t("mods_extra_attack", lang, bonus=m["attack_bonus"])
         if m["ability"]:
-            extra += f", команда боя: {m['ability'].get('combat_cmd')}"
+            extra += t("mods_extra_ability", lang, cmd=m["ability"].get("combat_cmd"))
         lines.append(
-            f"[{m['kind']}] {m['name']} ({m['code']}) — ур. {m['level']} "
-            f"({m['xp_invested']} опыта), {status}{extra}"
+            t(
+                "mods_item",
+                lang,
+                kind=m["kind"],
+                name=m["name"],
+                code=m["code"],
+                level=m["level"],
+                xp=m["xp_invested"],
+                status=status,
+                extra=extra,
+            )
         )
-    lines.append("Команды: install <код> | uninstall <код> | train <код> <опыт> | resetbuild")
+    lines.append(t("mods_hint", lang))
     return CommandResult(message="\n".join(lines))
 
 
@@ -329,18 +348,18 @@ async def cmd_install(session: AsyncSession, ctx: CommandContext, args: dict[str
     character = await _load(session, ctx)
     code = str(args.get("code", "")).strip()
     if not code:
-        raise DomainError("no_module", "Укажите модуль: install <код>")
+        raise DomainError("no_module", t("module_missing", character.lang, cmd="install"))
     await modules.install_module(session, character, code)
-    return CommandResult(message=f"Модуль «{code}» установлен.")
+    return CommandResult(message=t("install_ok", character.lang, code=code))
 
 
 async def cmd_uninstall(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     code = str(args.get("code", "")).strip()
     if not code:
-        raise DomainError("no_module", "Укажите модуль: uninstall <код>")
+        raise DomainError("no_module", t("module_missing", character.lang, cmd="uninstall"))
     await modules.uninstall_module(session, character, code)
-    return CommandResult(message=f"Модуль «{code}» снят (прогресс сохранён).")
+    return CommandResult(message=t("uninstall_ok", character.lang, code=code))
 
 
 async def cmd_train(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -348,10 +367,10 @@ async def cmd_train(session: AsyncSession, ctx: CommandContext, args: dict[str, 
     code = str(args.get("code", "")).strip()
     xp = int(args.get("xp", 0))
     if not code or xp <= 0:
-        raise DomainError("bad_args", "Формат: train <код> <опыт>")
+        raise DomainError("bad_args", t("train_bad", character.lang))
     await modules.train_module(session, character, code, xp)
     return CommandResult(
-        message=f"Вложено {xp} опыта в «{code}». Остаток пула: {character.xp_pool}."
+        message=t("train_ok", character.lang, xp=xp, code=code, pool=character.xp_pool)
     )
 
 
@@ -359,10 +378,7 @@ async def cmd_resetbuild(session: AsyncSession, ctx: CommandContext, args: dict[
     character = await _load(session, ctx)
     returned = await modules.reset_build(session, character)
     return CommandResult(
-        message=(
-            f"Сборка сброшена: {returned} опыта возвращено в пул "
-            f"(сейчас {character.xp_pool}). Модули остались установленными."
-        )
+        message=t("reset_ok", character.lang, returned=returned, pool=character.xp_pool)
     )
 
 
@@ -370,7 +386,7 @@ async def cmd_ability(session: AsyncSession, ctx: CommandContext, args: dict[str
     character = await _load(session, ctx)
     cmd = str(args.get("cmd", "")).strip()
     battle = await battles.player_ability(session, character, cmd)
-    return CommandResult(message=await _battle_message(session, battle))
+    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
 
 
 # --- этап 6: крафт и склад ---------------------------------------------------------
@@ -378,45 +394,63 @@ async def cmd_ability(session: AsyncSession, ctx: CommandContext, args: dict[str
 
 async def cmd_recipes(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     recipes = await crafting.list_recipes(session, character)
     if not recipes:
-        return CommandResult(message="Нет доступных рецептов.")
+        return CommandResult(message=t("recipes_empty", lang))
     lines = []
     for r in recipes:
-        mark = "готов" if r["can_craft"] else "нет материалов"
+        mark = t("recipe_ready", lang) if r["can_craft"] else t("recipe_no_materials", lang)
         lines.append(
-            f"{r['code']}: {r['name']} → {r['result']['qty']}× {r['result']['code']} "
-            f"({r['duration_sec']}с) [{mark}]"
+            t(
+                "recipe_line",
+                lang,
+                code=r["code"],
+                name=r["name"],
+                qty=r["result"]["qty"],
+                result=r["result"]["code"],
+                duration=r["duration_sec"],
+                mark=mark,
+            )
         )
         if r["missing"]:
-            lines.append("   не хватает: " + ", ".join(f"{m['lack']}× {m['code']}" for m in r["missing"]))
+            missing = ", ".join(f"{m['lack']}× {m['code']}" for m in r["missing"])
+            lines.append(t("recipe_missing", lang, list=missing))
     jobs = await crafting.running_jobs(session, character)
     if jobs:
-        lines.append(f"Занято слотов: {len(jobs)}/{character.craft_slots}.")
-    return CommandResult(message="Рецепты:\n" + "\n".join(lines))
+        lines.append(t("recipes_slots", lang, used=len(jobs), total=character.craft_slots))
+    return CommandResult(message=t("recipes_title", lang) + "\n" + "\n".join(lines))
 
 
 async def cmd_craft(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     code = str(args.get("code", "")).strip()
     if not code:
-        raise DomainError("bad_args", "Формат: craft <код_рецепта>")
+        raise DomainError("bad_args", t("craft_bad", character.lang))
     job = await crafting.start_craft(session, character, code)
     return CommandResult(
-        message=f"Производство «{code}» запущено (готово через {int((job.finishes_at - job.started_at).total_seconds())}с)."
+        message=t(
+            "craft_started",
+            character.lang,
+            code=code,
+            seconds=int((job.finishes_at - job.started_at).total_seconds()),
+        )
     )
 
 
 async def cmd_crafting(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     jobs = await crafting.running_jobs(session, character)
     if not jobs:
-        return CommandResult(message="Нет активных заказов.")
-    lines = [f"Слоты: {len(jobs)}/{character.craft_slots}"]
+        return CommandResult(message=t("crafting_empty", lang))
+    lines = [t("crafting_slots", lang, used=len(jobs), total=character.craft_slots)]
     for idx, job in enumerate(jobs, start=1):
         recipe = await session.get(RecipeTemplate, job.recipe_id)
-        lines.append(f"{idx}. {recipe.name if recipe else '?'} — до {job.finishes_at:%H:%M:%S}")
-    lines.append("Отмена: craftcancel <номер>")
+        lines.append(
+            t("crafting_item", lang, idx=idx, name=recipe.name if recipe else "?", time=f"{job.finishes_at:%H:%M:%S}")
+        )
+    lines.append(t("crafting_hint", lang))
     return CommandResult(message="\n".join(lines))
 
 
@@ -429,22 +463,24 @@ async def cmd_craft_cancel(session: AsyncSession, ctx: CommandContext, args: dic
 
 async def cmd_store(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     code = str(args.get("code", "")).strip()
     qty = int(args.get("qty", 0))
     if not code or qty <= 0:
-        raise DomainError("bad_args", "Формат: store <код> <количество>")
+        raise DomainError("bad_args", t("store_bad", lang))
     await crafting.store_item(session, character, code, qty)
-    return CommandResult(message=f"Перемещено на склад: {qty}× {code}.")
+    return CommandResult(message=t("store_ok", lang, qty=qty, code=code))
 
 
 async def cmd_take(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     code = str(args.get("code", "")).strip()
     qty = int(args.get("qty", 0))
     if not code or qty <= 0:
-        raise DomainError("bad_args", "Формат: take <код> <количество>")
+        raise DomainError("bad_args", t("take_bad", lang))
     await crafting.take_item(session, character, code, qty)
-    return CommandResult(message=f"Взято со склада: {qty}× {code}.")
+    return CommandResult(message=t("take_ok", lang, qty=qty, code=code))
 
 
 # --- этап 7: экономика -------------------------------------------------------------
@@ -455,63 +491,74 @@ async def cmd_wallet(session: AsyncSession, ctx: CommandContext, args: dict[str,
     eon = await economy.get_wallet(session, character.id, economy.EON)
     quant = await economy.get_wallet(session, character.id, economy.QUANT)
     return CommandResult(
-        message=(
-            f"Эоны: {eon.balance} (зарезервировано {eon.reserved})\n"
-            f"Кванты: {quant.balance} (зарезервировано {quant.reserved})"
+        message=t(
+            "wallet",
+            character.lang,
+            eon=eon.balance,
+            eon_r=eon.reserved,
+            quant=quant.balance,
+            quant_r=quant.reserved,
         )
     )
 
 
 async def cmd_send(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     name = str(args.get("name", "")).strip()
     amount = int(args.get("amount", 0))
     if not name or amount <= 0:
-        raise DomainError("bad_args", "Формат: send <имя> <кванты>")
+        raise DomainError("bad_args", t("send_bad", lang))
     recipient = await economy.find_recipient(session, name)
     transfer = await economy.create_transfer(session, character, recipient, quant=amount)
     if transfer.status == "pending_confirmation":
-        return CommandResult(message=f"Предложение отправлено «{recipient.name}» — ждёт подтверждения.")
-    return CommandResult(message=f"Отправлено {amount} Квантов игроку «{recipient.name}».")
+        return CommandResult(message=t("send_pending", lang, name=recipient.name))
+    return CommandResult(message=t("send_ok", lang, amount=amount, name=recipient.name))
 
 
 async def cmd_senditem(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     name = str(args.get("name", "")).strip()
     code = str(args.get("code", "")).strip()
     qty = int(args.get("qty", 0))
     if not name or not code or qty <= 0:
-        raise DomainError("bad_args", "Формат: senditem <имя> <код> <количество>")
+        raise DomainError("bad_args", t("senditem_bad", lang))
     recipient = await economy.find_recipient(session, name)
     transfer = await economy.create_transfer(
         session, character, recipient, items=[{"code": code, "qty": qty}]
     )
     if transfer.status == "pending_confirmation":
-        return CommandResult(message=f"Предложение отправлено «{recipient.name}» — ждёт подтверждения.")
-    return CommandResult(message=f"Отправлено {qty}× {code} игроку «{recipient.name}».")
+        return CommandResult(message=t("senditem_pending", lang, name=recipient.name))
+    return CommandResult(message=t("senditem_ok", lang, qty=qty, code=code, name=recipient.name))
 
 
 async def cmd_inbox(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     pending = await economy.pending_transfers(session, character)
     if not pending:
-        return CommandResult(message="Входящих предложений нет.")
+        return CommandResult(message=t("inbox_empty", lang))
     lines = []
     for transfer in pending:
         lines.append(
-            f"{transfer.id.hex[:8]}: от «{transfer.from_id}» — "
-            f"{transfer.payload.get('quant', 0)} Квантов, "
-            f"{sum(int(i['qty']) for i in transfer.payload.get('items', []))} предметов. "
-            f"confirm {transfer.id.hex[:8]} | decline {transfer.id.hex[:8]}"
+            t(
+                "inbox_item",
+                lang,
+                id8=transfer.id.hex[:8],
+                sender=transfer.from_id,
+                quant=transfer.payload.get("quant", 0),
+                items=sum(int(i["qty"]) for i in transfer.payload.get("items", [])),
+            )
         )
-    return CommandResult(message="Входящие предложения:\n" + "\n".join(lines))
+    return CommandResult(message=t("inbox_title", lang) + "\n" + "\n".join(lines))
 
 
 async def cmd_confirm(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     short_id = str(args.get("id", "")).strip()
     await economy.confirm_transfer(session, character, short_id)
-    return CommandResult(message="Передача подтверждена и исполнена.")
+    return CommandResult(message=t("confirm_ok", character.lang))
 
 
 async def cmd_sell(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -526,24 +573,40 @@ async def cmd_sell(session: AsyncSession, ctx: CommandContext, args: dict[str, A
         buyout=int(buyout) if buyout else None,
     )
     return CommandResult(
-        message=f"Лот создан: {lot.qty}× {code}, мин. {price} Квантов. ID: {lot.id.hex[:8]}"
+        message=t(
+            "sell_ok",
+            character.lang,
+            qty=lot.qty,
+            code=code,
+            price=price,
+            id8=lot.id.hex[:8],
+        )
     )
 
 
 async def cmd_lots(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     lots = await market.list_lots(session)
     if not lots:
-        return CommandResult(message="Активных лотов нет.")
+        return CommandResult(message=t("lots_empty", lang))
     lines = []
     for lot in lots:
-        mine = " (ваш)" if lot.seller_id == character.id else ""
-        top = f", ставка {lot.top_bid}" if lot.top_bid else ""
+        mine = t("lots_mine", lang) if lot.seller_id == character.id else ""
+        top = t("lots_top", lang, top=lot.top_bid) if lot.top_bid else ""
         lines.append(
-            f"{lot.id.hex[:8]}: {lot.qty}× {lot.item_code}, мин {lot.min_price_quant}{top}{mine}. "
-            f"bid {lot.id.hex[:8]} <цена>"
+            t(
+                "lots_item",
+                lang,
+                id8=lot.id.hex[:8],
+                qty=lot.qty,
+                code=lot.item_code,
+                min=lot.min_price_quant,
+                top=top,
+                mine=mine,
+            )
         )
-    return CommandResult(message="Аукцион:\n" + "\n".join(lines))
+    return CommandResult(message=t("lots_title", lang) + "\n" + "\n".join(lines))
 
 
 async def cmd_bid(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -551,8 +614,10 @@ async def cmd_bid(session: AsyncSession, ctx: CommandContext, args: dict[str, An
     lot_id = str(args.get("lot_id", "")).strip()
     amount = int(args.get("amount", 0))
     lot = await market.place_bid(session, character, lot_id, amount)
-    status = "продано с выкупом" if lot.status == "sold" else "ставка принята"
-    return CommandResult(message=f"{status}: {lot.item_code}, ваша цена {amount}.")
+    key = "bid_buyout" if lot.status == "sold" else "bid_ok"
+    return CommandResult(
+        message=t(key, character.lang, code=lot.item_code, amount=amount)
+    )
 
 
 async def cmd_lot_cancel(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -564,6 +629,7 @@ async def cmd_lot_cancel(session: AsyncSession, ctx: CommandContext, args: dict[
 
 async def cmd_market(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     side = str(args.get("side", "")).strip()
     if side:
         amount = int(args.get("amount", 0))
@@ -572,55 +638,65 @@ async def cmd_market(session: AsyncSession, ctx: CommandContext, args: dict[str,
             session, character, side=side, amount=amount, price=price
         )
         return CommandResult(
-            message=f"Ордер {side} размещён: {amount} Эонов по {price} Квантов. ID: {order.id.hex[:8]}"
+            message=t(
+                "market_order",
+                lang,
+                side=side,
+                amount=amount,
+                price=price,
+                id8=order.id.hex[:8],
+            )
         )
     reference = int(await stores.get_param(session, "market.reference_price_quant", 1000))
-    return CommandResult(
-        message=(
-            f"Внутренний рынок Эонов. Ориентир: 1 Эон ≈ {reference} Квантов.\n"
-            "market buy <эоны> <цена> — купить Эоны за Кванты\n"
-            "market sell <эоны> <цена> — продать Эоны за Кванты\n"
-            "Сведение ордеров — автоматически (worker)."
-        )
-    )
+    return CommandResult(message=t("market_help", lang, reference=reference))
 
 
 async def cmd_shop(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
-    await _load(session, ctx)
+    character = await _load(session, ctx)
+    lang = character.lang
     offers = await market.list_offers(session)
     if not offers:
-        return CommandResult(message="Магазин пуст.")
-    lines = [f"{o.code}: {o.kind} — {o.price_eon} Эонов" for o in offers]
-    lines.append("Покупка: buy <код>")
-    return CommandResult(message="Магазин:\n" + "\n".join(lines))
+        return CommandResult(message=t("shop_empty", lang))
+    lines = [
+        t("shop_item", lang, code=o.code, kind=o.kind, price=o.price_eon) for o in offers
+    ]
+    lines.append(t("shop_hint", lang))
+    return CommandResult(message=t("shop_title", lang) + "\n" + "\n".join(lines))
 
 
 async def cmd_buy(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     code = str(args.get("code", "")).strip()
     purchase = await market.buy_offer(session, character, code)
-    return CommandResult(message=f"Покупка «{code}» оплачена ({purchase.status}).")
+    return CommandResult(
+        message=t("buy_ok", character.lang, code=code, status=purchase.status)
+    )
 
 
 async def cmd_sync(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
-    """Анти-застревание: обработать просроченные таймеры игрока (прибытие, крафт…).
-
-    На сервере это делает worker; команда нужна, когда worker не запущен (локальный
-    запуск) или как ручной рычаг «докрутить» прогресс.
-    """
     from app.timer_handlers import sync_character_timers
 
     assert ctx.character_id is not None
-    fired = await sync_character_timers(session, ctx.character_id)
+    character = await _load(session, ctx)
+    fired = await sync_character_timers(session, character.id)
     if not fired:
-        return CommandResult(message="Все таймеры в норме, застреваний нет.")
-    names = ", ".join(fired)
-    return CommandResult(message=f"Обработано просроченных событий: {names}.")
+        return CommandResult(message=t("sync_empty", character.lang))
+    return CommandResult(
+        message=t("sync_fired", character.lang, names=", ".join(fired))
+    )
 
 
 async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
-    text = await quests_mod.describe_quests(session, character)
+    lang = character.lang
+    text = t("quests_title", lang) + "\n" if await quests_mod.active_quests(session, character) else ""
+    for state, quest in await quests_mod.active_quests(session, character):
+        parts = []
+        for idx, objective in enumerate(quest.objectives):
+            need = int(objective.get("count", 1))
+            have = min(int(state.progress.get(str(idx), 0)), need)
+            parts.append(f"{objective.get('type')} {have}/{need}")
+        text += t("quest_item", lang, name=quest.name, progress=", ".join(parts)) + "\n"
     now = datetime.now(UTC)
     events = (
         await session.scalars(
@@ -630,7 +706,7 @@ async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str,
         )
     ).all()
     if events:
-        lines = [text, "", "Фракционные события:"]
+        lines = [t("fevents_title", lang)]
         for event in events:
             goal = (event.config or {}).get("goal", {})
             contribution = await session.scalar(
@@ -640,17 +716,22 @@ async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str,
             )
             total = int(contribution or 0)
             lines.append(
-                f"— {event.name}: общий прогресс {total}/{int(goal.get('count', 0))} "
-                f"(до {event.ends_at:%d.%m %H:%M})"
+                t(
+                    "fevent_item",
+                    lang,
+                    name=event.name,
+                    total=total,
+                    goal=int(goal.get("count", 0)),
+                    until=f"{event.ends_at:%d.%m %H:%M}",
+                )
             )
-        text = "\n".join(lines)
-    return CommandResult(message=text)
+        text += "\n" + "\n".join(lines)
+    return CommandResult(message=text.rstrip())
 
 
 # --- разбор текста (общий для адаптеров) --------------------------------------
 
 def split_text_command(text: str) -> tuple[str, str]:
-    """'start Иван azimuth' -> ('start', 'Иван azimuth')"""
     parts = text.strip().split(maxsplit=1)
     if not parts:
         return "", ""
@@ -686,7 +767,6 @@ def parse_command(text: str) -> tuple[str, dict[str, Any]]:
         if cmd == "craftcancel" and tokens:
             return cmd, {"index": int(tokens[0])}
         return cmd, {"code": tokens[0]} if tokens else {}
-    # этап 7: экономика
     if cmd == "send":
         tokens = rest.split()
         if len(tokens) >= 2:
@@ -744,7 +824,6 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "inv": cmd_inv,
     "inventory": cmd_inv,
     "ship": cmd_ship,
-    # этап 3: экспедиции
     "exp": cmd_exp,
     "expedition": cmd_exp,
     "launch": cmd_launch,
@@ -755,7 +834,6 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "decline": cmd_decline,
     "return": cmd_return,
     "вернуться": cmd_return,
-    # этап 4: бой
     "attack": cmd_attack,
     "атака": cmd_attack,
     "use": cmd_use,
@@ -763,21 +841,18 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "battle": cmd_battle,
     "бой": cmd_battle,
     "blog": cmd_battle_log,
-    # этап 5: модули и развитие
     "mods": cmd_mods,
     "install": cmd_install,
     "uninstall": cmd_uninstall,
     "train": cmd_train,
     "resetbuild": cmd_resetbuild,
     "ability": cmd_ability,
-    # этап 6: крафт и склад
     "recipes": cmd_recipes,
     "craft": cmd_craft,
     "crafting": cmd_crafting,
     "craftcancel": cmd_craft_cancel,
     "store": cmd_store,
     "take": cmd_take,
-    # этап 7: экономика
     "wallet": cmd_wallet,
     "send": cmd_send,
     "senditem": cmd_senditem,
@@ -790,8 +865,6 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "market": cmd_market,
     "shop": cmd_shop,
     "buy": cmd_buy,
-    # этап 8: задания и фракционные события
     "quests": cmd_quests,
-    # анти-застревание (локальный запуск без worker'а)
     "sync": cmd_sync,
 }

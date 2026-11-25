@@ -88,6 +88,7 @@ class Character(Base, TimestampMixin):
     )
     xp_pool: Mapped[int] = mapped_column(BigInteger, default=0)
     build_resets: Mapped[int] = mapped_column(default=0)  # число сбросов сборки (стоимость растёт)
+    lang: Mapped[str] = mapped_column(String(8), default="ru")  # i18n: пока активен только ru
 
 
 class Reputation(Base):
@@ -311,6 +312,8 @@ class Expedition(Base, TimestampMixin):
     )  # voluntary|fuel_empty|defeat
     return_eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # кулдаун между событиями: go раньше next_event_at отклоняется (ТЗ: 10с +1с за каждые 2 топлива)
+    next_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ExpeditionEvent(Base, TimestampMixin):
