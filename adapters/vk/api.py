@@ -4,6 +4,7 @@
 код 6 (too many requests per second) → VkRateLimited. Остальные — VkApiError
 (без ретрая: отправка бессмысленна, запись уйдёт в failed и заметит алерт).
 """
+import json
 import random
 from typing import Any
 
@@ -72,10 +73,17 @@ class VkApi:
         assert isinstance(data, dict)
         return data
 
-    async def send_message(self, user_id: int, text: str) -> int:
-        response = await self.call(
-            "messages.send", user_id=user_id, message=text, random_id=random.randint(-2**31, 2**31 - 1)
-        )
+    async def send_message(
+        self, user_id: int, text: str, *, keyboard: dict[str, Any] | None = None
+    ) -> int:
+        params: dict[str, Any] = {
+            "user_id": user_id,
+            "message": text,
+            "random_id": random.randint(-(2**31), 2**31 - 1),
+        }
+        if keyboard is not None:
+            params["keyboard"] = json.dumps(keyboard, ensure_ascii=False)
+        response = await self.call("messages.send", **params)
         return int(response)
 
 

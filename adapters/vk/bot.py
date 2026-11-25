@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 
 from adapters.vk.api import VkApi, VkSender
-from app import db
+from app import characters, db
 from app.bus import CommandBus
 from app.config import get_settings
 from app.logging import configure_logging
@@ -79,10 +79,32 @@ async def run_bot() -> None:
         log.info("vk_bot_stopped")
 
 
+async def _keyboard_for_user(platform_user_id: str) -> dict[str, Any]:  # keyboard всегда есть
+    """Меню-кнопки по состоянию игрока (read-only, ничего не создаёт)."""
+    import sqlalchemy as sa
+
+    from app.keyboards import keyboard_for_character, keyboard_for_new_user
+    from app.models_game import AccountIdentity
+
+    async with db.session_factory() as session, db.transactional(session):
+        identity = await session.scalar(
+            sa.select(AccountIdentity).where(
+                AccountIdentity.platform == "vk",
+                AccountIdentity.platform_user_id == platform_user_id,
+            )
+        )
+        if identity is None:
+            return await keyboard_for_new_user()
+        character = await characters.get_active_character(session, identity.account_id)
+        if character is None:
+            return await keyboard_for_new_user()
+        return (await keyboard_for_character(session, character.id)) or (await keyboard_for_new_user())
+
+
 async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) -> None:
     if update.get("type") != "message_new":
         return
-    obj = update.get("object", {})
+    obj: dict[str, Any] = update.get("object", {})
     message = obj.get("message", obj)  # схема v5.199: object.message
     user_id = message.get("from_id")
     text = (message.get("text") or "").strip()
@@ -98,9 +120,11 @@ async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) ->
             text=text,
             idempotency_key=key,
         )
-        await api.send_message(int(user_id), result.message[:4000])
+        keyboard = await _keyboard_for_user(str(user_id))
+        await api.send_message(int(user_id), result.message[:4000], keyboard=keyboard)
     except DomainError as exc:
-        await api.send_message(int(user_id), exc.message[:4000])
+        keyboard = await _keyboard_for_user(str(user_id))
+        await api.send_message(int(user_id), exc.message[:4000], keyboard=keyboard)
     except Exception:  # noqa: BLE001 — одно плохое обновление не останавливает бота
         log.exception("vk_update_error", update=update)
 
