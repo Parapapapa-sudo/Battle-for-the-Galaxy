@@ -87,3 +87,63 @@ def test_chance_labels():
     assert chance_label(20) == "низкая"
     assert chance_label(50) == "средняя"
     assert chance_label(80) == "высокая"
+
+
+def test_damage_exact_when_spread_zero():
+    for seed in range(50):
+        assert roll_damage(37, random.Random(seed), spread_pct=0) == 37
+
+
+def test_damage_bounds_ninety_to_one_hundred_ten():
+    for seed in range(20):
+        rng = random.Random(seed)
+        for _ in range(200):
+            dmg = roll_damage(100, rng, spread_pct=10)
+            assert 90 <= dmg <= 110
+
+
+def test_incoming_modifiers_combo_uses_floor_rounding():
+    # 99 * 0.8 = 79.2 -> 79 (отбрасывание дробной части); 79 * 1.25 = 98.75 -> 98
+    assert apply_incoming_modifiers(99, {"damage_reduction_pct": 20}, {"bonus_damage_taken_pct": 25}) == 98
+
+
+def test_incoming_modifiers_never_below_one():
+    assert apply_incoming_modifiers(5, {"damage_reduction_pct": 99}, {}) == 1
+
+
+def test_retreat_failure_never_applies_damage_or_malfunction():
+    fail = roll_retreat(
+        chance_pct=0, damage_chance_pct=100, damage_amount=10,
+        malfunction_chance_pct=100, rng=random.Random(1),
+    )
+    assert not fail.success
+    assert fail.damage == 0
+    assert not fail.malfunction
+
+
+def test_roll_loot_respects_weights_statistically():
+    entries = [
+        {"code": "a", "weight": 90, "qty_min": 1, "qty_max": 1, "chance": 1.0},
+        {"code": "b", "weight": 10, "qty_min": 1, "qty_max": 1, "chance": 1.0},
+    ]
+    counts = {"a": 0, "b": 0}
+    for seed in range(500):
+        loot = roll_loot(entries, random.Random(seed))
+        assert len(loot) == 1
+        counts[loot[0]["code"]] += 1
+    # ожидание: a ≈ 450, b ≈ 50; допуск ±15%
+    assert 380 <= counts["a"] <= 480
+    assert 20 <= counts["b"] <= 120
+
+
+def test_chance_label_threshold_boundaries():
+    # границы включены в соседние метки
+    assert chance_label(35) == "низкая"
+    assert chance_label(36) == "средняя"
+    assert chance_label(64) == "средняя"
+    assert chance_label(65) == "высокая"
+
+
+def test_chance_label_custom_thresholds():
+    assert chance_label(50, low_max=60, high_min=90) == "низкая"
+    assert chance_label(80, low_max=60, high_min=90) == "средняя"

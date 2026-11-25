@@ -327,6 +327,7 @@ async def test_event_cooldown_between_go(session, seeded):
     expedition = await expeditions.launch_expedition(session, character)
 
     event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
+    assert event is not None
     if event.snapshot["kind"] == "interactive":
         await expeditions.decline_event(session, character)
     # повторный go сразу → кулдаун (база 10с + потраченное топливо // 2)

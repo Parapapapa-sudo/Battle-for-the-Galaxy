@@ -62,3 +62,40 @@ def test_danger_labels():
     assert danger_label(1, 2) == "низкая"
     assert danger_label(4, 5, low_max=3, high_min=7) == "средняя"
     assert danger_label(7, 9) == "высокая"
+
+
+def test_roll_queue_stops_when_all_uniques_exhausted():
+    all_unique = [QueueEntry("u1", 10, is_unique=True), QueueEntry("u2", 10, is_unique=True)]
+    queue = roll_queue(all_unique, 10, random.Random(1))
+    assert sorted(queue) == ["u1", "u2"]
+
+
+def test_roll_queue_empty_when_used_unique_covers_all():
+    entries = [QueueEntry("only", 10, is_unique=True)]
+    queue = roll_queue(entries, 5, random.Random(1), used_unique={"only"})
+    assert queue == []
+
+
+def test_roll_queue_zero_weight_entries_never_picked():
+    entries = [QueueEntry("real", 10), QueueEntry("ghost", 0)]
+    for seed in range(500):
+        queue = roll_queue(entries, 5, random.Random(seed))
+        assert "ghost" not in queue
+        assert queue == ["real"] * 5
+
+
+def test_pick_variant_partial_chances_leave_room_for_fallback():
+    variants: list[dict[str, Any]] = [
+        {"chance": 0.3, "id": "a"},
+        {"chance": 0.3, "id": "b"},
+        {"id": "c"},
+    ]
+    seen = {pick_variant(variants, random.Random(s)).get("id") for s in range(300)}
+    # fallback «c» занимает остаток 0.4 — должен встречаться
+    assert seen == {"a", "b", "c"}
+
+
+def test_pick_variant_zero_chance_never_picked():
+    variants: list[dict[str, Any]] = [{"chance": 0.0, "id": "never"}, {"id": "fallback"}]
+    for s in range(50):
+        assert pick_variant(variants, random.Random(s))["id"] == "fallback"
