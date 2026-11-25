@@ -137,3 +137,18 @@ async def analytics(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
             return await admin.analytics(session, adm)
         except DomainError as exc:
             _guard(exc)
+
+
+@router.post("/admins")
+async def create_admin(
+    body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, str]:
+    """Создать администратора/модератора/контент-менеджера. Ключ показывается один раз."""
+    async with session_factory() as session, transactional(session):
+        try:
+            api_key = await admin.create_admin(
+                session, adm, login=str(body["login"]), role=str(body["role"])
+            )
+            return {"login": str(body["login"]), "api_key": api_key}
+        except DomainError as exc:
+            _guard(exc)

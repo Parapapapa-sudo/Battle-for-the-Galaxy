@@ -84,6 +84,33 @@ async def audit(
     )
 
 
+async def create_admin(
+    session: AsyncSession, admin: AdminUser, *, login: str, role: str
+) -> str:
+    """Создание администратора/модератора/контент-менеджера. Возвращает API-ключ (один раз)."""
+    import secrets
+
+    require_role(admin, "admin")
+    if role not in ("admin", "moderator", "content_manager"):
+        raise DomainError("bad_role", "Роль: admin|moderator|content_manager.")
+    existing = await session.scalar(sa.select(AdminUser).where(AdminUser.login == login))
+    if existing is not None:
+        raise DomainError("admin_exists", f"«{login}» уже существует.")
+    api_key = f"adm-{secrets.token_urlsafe(24)}"
+    session.add(
+        AdminUser(
+            login=login,
+            api_key_hash=hash_key(api_key),
+            role=role,
+            created_by=admin.login,
+        )
+    )
+    await audit(session, admin, "create_admin", target_type="admin", target_id=login,
+                after={"role": role})
+    await session.flush()
+    return api_key
+
+
 # --- модерация ---------------------------------------------------------------------
 
 
