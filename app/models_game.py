@@ -314,6 +314,8 @@ class Expedition(Base, TimestampMixin):
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # кулдаун между событиями: go раньше next_event_at отклоняется (ТЗ: 10с +1с за каждые 2 топлива)
     next_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # «Залатать корабль»: до patch_eta идёт ремонт (таймер, реальное время)
+    patch_eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ExpeditionEvent(Base, TimestampMixin):

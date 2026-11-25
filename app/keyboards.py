@@ -1,24 +1,25 @@
 """VK-клавиатуры: локализованные кнопки; payload несёт команду, label — текст на языке игрока.
 
-VK text-кнопка шлёт боту label, НО при наличии payload бот читает его как команду
-(см. adapters/vk/bot.py) — поэтому label можно переводить, не ломая протокол команд.
+- Элемент ряда: строка-команда (label из локали) или кортеж (команда, label).
+- Событие с выбором: кнопки несут ТЕКСТ варианта, payload — «choice <key>»;
+  отказ — «Пропустить», для боевых событий — «Проскочить».
 """
+import json
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.locale import t
 
-# цвета VK
 COLOR_BY_COMMAND = {
     "attack": "positive",
     "go": "positive",
     "launch": "positive",
+    "patch": "positive",
     "retreat": "negative",
     "decline": "negative",
 }
 
-# команда → ключ локали для label
 LABEL_KEY = {
     "me": "kb_me",
     "inv": "kb_inv",
@@ -33,6 +34,7 @@ LABEL_KEY = {
     "exp": "kb_exp",
     "return": "kb_return",
     "sync": "kb_sync",
+    "patch": "kb_patch",
     "attack": "kb_attack",
     "retreat": "kb_retreat",
     "decline": "kb_decline",
@@ -41,30 +43,44 @@ LABEL_KEY = {
 }
 
 
-def vk_keyboard(rows: list[list[str]], lang: str = "ru") -> dict[str, Any]:
-    """rows — список рядов, ряд — список команд. label локализован, payload = команда."""
-    return {
-        "one_time": False,
-        "inline": False,
-        "buttons": [
-            [
+def vk_keyboard(rows: list[list[Any]], lang: str = "ru") -> dict[str, Any]:
+    buttons = []
+    for row in rows:
+        brow = []
+        for entry in row:
+            if isinstance(entry, tuple):
+                cmd, label = entry
+            else:
+                cmd, label = entry, t(LABEL_KEY.get(entry, entry), lang)
+            brow.append(
                 {
                     "action": {
                         "type": "text",
-                        "label": t(LABEL_KEY.get(cmd, cmd), lang),
-                        "payload": f'{{"cmd": "{cmd}"}}',
+                        "label": label[:40],
+                        "payload": json.dumps({"cmd": cmd}, ensure_ascii=False),
                     },
-                    "color": COLOR_BY_COMMAND.get(cmd, "secondary"),
+                    "color": COLOR_BY_COMMAND.get(cmd.split()[0], "secondary"),
                 }
-                for cmd in row
-            ]
-            for row in rows
-        ],
-    }
+            )
+        buttons.append(brow)
+    return {"one_time": False, "inline": False, "buttons": buttons}
 
 
 def empty_keyboard() -> dict[str, Any]:
     return {"one_time": False, "buttons": []}
+
+
+def _event_choice_rows(snapshot: dict[str, Any], lang: str) -> list[list[Any]]:
+    """Кнопки вариантов события: label — текст выбора; отказ — Пропустить/Проскочить."""
+    choices = snapshot.get("script", {}).get("choices", [])
+    is_enemy = any("battle" in (c.get("outcome") or {}) for c in choices)
+    rows: list[list[Any]] = [
+        [(f"choice {c.get('key')}", str(c.get("text", c.get("key")))) for c in choices[i : i + 2]]
+        for i in range(0, len(choices), 2)
+    ]
+    if snapshot.get("can_refuse"):
+        rows.append([("decline", t("kb_dodge" if is_enemy else "kb_skip", lang))])
+    return rows
 
 
 async def keyboard_for_character(
@@ -84,7 +100,7 @@ async def keyboard_for_character(
     battle = await get_active_battle(session, character_id)
     if battle is not None:
         abilities = await installed_abilities(session, character)
-        rows: list[list[str]] = [
+        rows: list[list[Any]] = [
             ["attack"] + [str(a["combat_cmd"]) for a in abilities],
             ["use nano_patch", "retreat"],
         ]
@@ -96,12 +112,9 @@ async def keyboard_for_character(
             return vk_keyboard([["exp", "sync"]], lang)
         offered = await _current_offered_event(session, expedition)
         if offered is not None and offered.snapshot.get("kind") == "interactive":
-            keys = [str(c.get("key")) for c in offered.snapshot.get("script", {}).get("choices", [])]
-            rows = [keys[i : i + 3] for i in range(0, len(keys), 3)]
-            if offered.snapshot.get("can_refuse"):
-                rows.append(["decline"])
-            return vk_keyboard(rows, lang)
-        return vk_keyboard([["go", "exp"], ["return"]], lang)
+            return vk_keyboard(_event_choice_rows(offered.snapshot, lang), lang)
+        # свободное плавание: исследовать / инфо / залатать / вернуться
+        return vk_keyboard([["go", "exp", "patch"], ["return"]], lang)
 
     return vk_keyboard(
         [

@@ -675,6 +675,12 @@ async def cmd_buy(session: AsyncSession, ctx: CommandContext, args: dict[str, An
     )
 
 
+async def cmd_patch(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    character = await _load(session, ctx)
+    delay = await expeditions.start_patch(session, character)
+    return CommandResult(message=t("patch_started", character.lang, delay=delay))
+
+
 async def cmd_sync(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     from app.timer_handlers import sync_character_timers
 
@@ -869,4 +875,7 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "buy": cmd_buy,
     "quests": cmd_quests,
     "sync": cmd_sync,
+    # ремонт в экспедиции
+    "patch": cmd_patch,
+    "залатать": cmd_patch,
 }

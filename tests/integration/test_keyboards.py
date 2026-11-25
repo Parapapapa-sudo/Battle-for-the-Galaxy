@@ -64,7 +64,8 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     expedition = await expeditions.launch_expedition(session, character)
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
-    assert {"go", "exp", "return"} <= set(_labels(kb))
+    # свободное плавание: Исследовать / Инфо / Залатать корабль / Вернуться
+    assert {"Исследовать", "Инфо", "Залатать корабль"} <= set(_labels(kb))
 
     # кнопка способности появляется, только если модуль установлен
     await battles.start_battle(
@@ -94,6 +95,10 @@ async def test_interactive_event_shows_choice_buttons(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     labels = _labels(kb)
-    assert "1" in labels and "2" in labels  # варианты выбора — кнопками
-    assert "decline" in labels
+    # кнопки несут ТЕКСТ вариантов события (payload — команда choice)
+    payloads = [b["action"]["payload"] for row in kb["buttons"] for b in row]
+    assert any("choice 1" in p for p in payloads)
+    assert any("choice 2" in p for p in payloads)
+    assert "Пропустить" in labels or "Проскочить" in labels  # отказ (обычное/боевое событие)
+    assert "decline" in " ".join(payloads)
     assert "go" not in labels

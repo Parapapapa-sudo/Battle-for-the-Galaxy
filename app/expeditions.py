@@ -31,6 +31,7 @@ from app.models_game import (
 )
 from core.errors import DomainError
 from core.expeditions import QueueEntry, danger_label, pick_variant, roll_queue
+from core.hull import max_hull
 
 # --- загрузка -----------------------------------------------------------------
 
@@ -164,6 +165,7 @@ async def proceed(
     if await get_active_battle(session, character.id) is not None:
         raise DomainError("battle_active", "Сначала завершите бой (attack / retreat).")
     expedition = await get_ongoing_expedition(session, character.id)
+    _raise_if_repairing(expedition)
     if expedition is None or expedition.status != "active":
         raise DomainError("no_expedition", "Экспедиция не активна.")
 
@@ -447,6 +449,7 @@ async def request_return(session: AsyncSession, character: Character) -> None:
         raise DomainError("no_expedition", "Экспедиция не активна.")
     if expedition.status == "returning":
         raise DomainError("already_returning", "Корабль уже возвращается.")
+    _raise_if_repairing(expedition)
     offered = await _current_offered_event(session, expedition)
     if offered is not None:
         snap = offered.snapshot
@@ -477,6 +480,74 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
             depth=expedition.depth,
             fuel=expedition.fuel_remaining,
         ),
+    )
+    await session.flush()
+
+
+# --- «Залатать корабль» (ремонт в экспедиции) -------------------------------------
+
+
+def _raise_if_repairing(expedition: Expedition | None) -> None:
+    if expedition is not None and expedition.patch_eta is not None:
+        now = datetime.now(UTC)
+        if expedition.patch_eta > now:
+            wait = int((expedition.patch_eta - now).total_seconds()) + 1
+            raise DomainError(
+                "ship_repairing", f"Идёт ремонт корабля — осталось {wait}с.", details={"wait_sec": wait}
+            )
+
+
+async def start_patch(session: AsyncSession, character: Character) -> int:
+    """Начать ремонт: восстановит текущую прочность до максимума (с учётом травм).
+
+    Длительность — config ship.patch_duration_sec (базово 20с), идёт в реальном
+    времени (таймер, офлайн продолжается). Пока идёт ремонт: go/return недоступны.
+    """
+    from app.battles import get_active_battle
+
+    if await get_active_battle(session, character.id) is not None:
+        raise DomainError("battle_active", "Нельзя ремонтироваться в бою.")
+    expedition = await get_ongoing_expedition(session, character.id)
+    if expedition is None or expedition.status != "active":
+        raise DomainError("no_expedition", "Экспедиция не активна.")
+    _raise_if_repairing(expedition)
+    offered = await _current_offered_event(session, expedition)
+    if offered is not None:
+        raise DomainError("event_pending", "Сначала завершите событие.")
+    ship = await get_ship(session, character.id)
+    cap = max_hull(ship.base_max_hull, ship.malfunctions)
+    if ship.current_hull >= cap:
+        raise DomainError("hull_full", "Корабль в полном порядке, ремонт не нужен.")
+
+    delay = int(await stores.get_param(session, "ship.patch_duration_sec", 20))
+    expedition.patch_eta = datetime.now(UTC) + timedelta(seconds=delay)
+    session.add(
+        Timer(
+            type="ship_patch",
+            character_id=character.id,
+            payload={"expedition_id": str(expedition.id)},
+            fires_at=expedition.patch_eta,
+        )
+    )
+    await session.flush()
+    return delay
+
+
+async def patch_complete(session: AsyncSession, payload: dict[str, Any]) -> None:
+    """Таймер ремонта: текущая прочность → максимум (base × (1 − 0.05×травмы))."""
+    expedition = await session.get(Expedition, uuid.UUID(str(payload["expedition_id"])))
+    if expedition is None or expedition.patch_eta is None:
+        return
+    character = await session.get(Character, expedition.character_id)
+    lang = character.lang if character is not None else "ru"
+    ship = await get_ship(session, expedition.character_id)
+    cap = max_hull(ship.base_max_hull, ship.malfunctions)
+    ship.current_hull = cap
+    expedition.patch_eta = None
+    await stores.add_outbox(
+        session,
+        character_id=expedition.character_id,
+        text=t("patch_done", lang, hull=ship.current_hull, cap=cap),
     )
     await session.flush()
 
