@@ -276,6 +276,43 @@ async def set_content_status(
 # --- аналитика (MVP) -------------------------------------------------------------------
 
 
+async def whoami(admin: AdminUser) -> dict[str, Any]:
+    """Информация о ключе — для UI (показ роли и доступных разделов)."""
+    return {"login": admin.login, "role": admin.role}
+
+
+async def lookup_character(
+    session: AsyncSession, admin: AdminUser, name: str
+) -> list[dict[str, Any]]:
+    """Поиск персонажей по имени (для банов/эффектов в UI)."""
+    require_role(admin, "admin", "moderator")
+    rows = (
+        await session.scalars(
+            sa.select(Character).where(
+                Character.name_normalized == name.strip().lower(),
+                Character.status == "active",
+            )
+        )
+    ).all()
+    return [
+        {
+            "character_id": str(c.id),
+            "account_id": str(c.account_id),
+            "name": c.name,
+        }
+        for c in rows
+    ]
+
+
+async def list_effects(session: AsyncSession, admin: AdminUser) -> list[dict[str, Any]]:
+    """Белый список эффектов (для формы наложения)."""
+    require_role(admin, "admin", "moderator")
+    templates = (
+        await session.scalars(sa.select(EffectTemplate).order_by(EffectTemplate.code))
+    ).all()
+    return [{"code": t.code, "scope": t.scope} for t in templates]
+
+
 async def analytics(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
     require_role(admin, "admin")
     now = datetime.now(UTC)

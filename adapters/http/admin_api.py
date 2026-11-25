@@ -152,3 +152,28 @@ async def create_admin(
             return {"login": str(body["login"]), "api_key": api_key}
         except DomainError as exc:
             _guard(exc)
+
+
+@router.get("/whoami")
+async def whoami(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    return await admin.whoami(adm)
+
+
+@router.get("/lookup")
+async def lookup(
+    name: str, adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return {"results": await admin.lookup_character(session, adm, name)}
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.get("/effects")
+async def effects(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return {"effects": await admin.list_effects(session, adm)}
+        except DomainError as exc:
+            _guard(exc)
