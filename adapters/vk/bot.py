@@ -41,6 +41,14 @@ async def run_bot() -> None:
 
     api = VkApi(settings.vk_bot_token, api_version=settings.vk_api_version)
     bus = CommandBus(db.session_factory)
+
+    # Единственный поллер сообщества: второй экземпляр бота не стартует
+    # (иначе VK Long Poll дублирует события и игрокам уходят повторы ответов).
+    lock_conn = await db.engine.connect()
+    bot_lock = db.LeaderLock(lock_conn, key=db.LeaderLock.KEY_VK_BOT)
+    if not await bot_lock.acquire():
+        log.error("vk_bot_already_running", group=settings.vk_group_id)
+        raise SystemExit(1)
     dispatcher = dispatcher_from_settings(
         db.session_factory, VkSender(db.session_factory, api), settings
     )
@@ -76,6 +84,8 @@ async def run_bot() -> None:
     finally:
         stop.set()
         await pump
+        await bot_lock.release()
+        await lock_conn.close()
         await db.engine.dispose()
         log.info("vk_bot_stopped")
 

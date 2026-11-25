@@ -51,21 +51,28 @@ async def try_advisory_lock(conn: AsyncConnection, key: str) -> bool:
 
 
 class LeaderLock:
-    """Сессионная блокировка лидера worker'а (таймеры/диспетчер запускаются в одном экземпляре)."""
+    """Сессионная блокировка лидера (worker, VK-бот): один экземпляр процесса на кластер.
 
-    KEY = 727_000
+    VK Long Poll с несколькими поллерами одного сообщества дублирует события
+    (рассинхрон ts) — бот обязан быть в одном экземпляре, иначе игрокам
+    переотправляются старые ответы.
+    """
 
-    def __init__(self, conn: AsyncConnection) -> None:
+    KEY = 727_000  # worker
+    KEY_VK_BOT = 727_001  # vk-адаптер
+
+    def __init__(self, conn: AsyncConnection, *, key: int | None = None) -> None:
+        self._key = key if key is not None else self.KEY
         self._conn = conn
 
     async def acquire(self) -> bool:
         row = await self._conn.execute(
-            sa.text("SELECT pg_try_advisory_lock(:key)"), {"key": self.KEY}
+            sa.text("SELECT pg_try_advisory_lock(:key)"), {"key": self._key}
         )
         return bool(row.scalar_one())
 
     async def release(self) -> None:
-        await self._conn.execute(sa.text("SELECT pg_advisory_unlock(:key)"), {"key": self.KEY})
+        await self._conn.execute(sa.text("SELECT pg_advisory_unlock(:key)"), {"key": self._key})
 
 
 async def health_check() -> bool:
