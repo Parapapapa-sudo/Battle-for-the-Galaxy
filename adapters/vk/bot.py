@@ -112,6 +112,33 @@ async def _keyboard_for_user(platform_user_id: str) -> dict[str, Any]:  # keyboa
         return (await keyboard_for_character(session, character.id)) or (await keyboard_for_new_user())
 
 
+class _RecentReplies:
+    """Ключи vk-обновлений, на которые бот уже ответил (в процессе).
+
+    VK может повторно доставить обработанное событие (несколько поллеров,
+    сбой ts, реконнекты) — идемпотентность защищает от повторных ЭФФЕКТОВ,
+    а это защищает от повторной ОТПРАВКИ ответа игроку.
+    """
+
+    def __init__(self, capacity: int = 10_000) -> None:
+        self._keys: set[str] = set()
+        self._order: list[str] = []
+        self._capacity = capacity
+
+    def seen(self, key: str) -> bool:
+        if key in self._keys:
+            return True
+        self._keys.add(key)
+        self._order.append(key)
+        if len(self._order) > self._capacity:
+            oldest = self._order.pop(0)
+            self._keys.discard(oldest)
+        return False
+
+
+_REPLIES = _RecentReplies()
+
+
 async def _send_with_retry(
     api: VkApi, user_id: int, text: str, keyboard: dict[str, Any] | None, *, attempts: int = 4
 ) -> None:
@@ -147,6 +174,9 @@ async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) ->
     if not user_id or not text:
         return
     key = f"vk:{user_id}:{message.get('conversation_message_id', message.get('id'))}"
+    if _REPLIES.seen(key):
+        log.info("vk_update_duplicate_skipped", key=key)
+        return
     try:
         result = await route_text_command(
             bus,
