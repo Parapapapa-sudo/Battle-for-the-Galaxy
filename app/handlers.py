@@ -252,15 +252,15 @@ async def cmd_return(session: AsyncSession, ctx: CommandContext, args: dict[str,
 
 
 async def _battle_message(
-    session: AsyncSession, battle: Battle, *, header: bool = True, lang: str = "ru"
+    session: AsyncSession, battle: Battle, *, header: bool = False, lang: str = "ru"
 ) -> str:
-    lines: list[str] = []
+    """Экран боя. header=True — вступительный (характеристики сторон, ещё не ход 1);
+    иначе — итог раунда: действия сверху, HP-блоки ниже. Финал — отдельное сообщение."""
+    if battle.status in ("won", "lost"):
+        return await battles.describe_battle_outcome(session, battle, lang)
     if header:
-        lines.append(await battles.describe_battle(session, battle, lang=lang))
-    turns = await battles.battle_journal(session, battle, limit=3)
-    for turn in turns:
-        lines.append(f"[{turn.actor}] {turn.summary}")
-    return "\n".join(lines)
+        return await battles.describe_battle(session, battle, lang=lang)
+    return await battles.describe_round_result(session, battle, lang=lang)
 
 
 async def cmd_attack(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -289,7 +289,9 @@ async def cmd_battle(session: AsyncSession, ctx: CommandContext, args: dict[str,
     battle = await battles.get_active_battle(session, character.id)
     if battle is None:
         return CommandResult(message=t("battle_none", character.lang))
-    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
+    return CommandResult(
+        message=await _battle_message(session, battle, header=True, lang=character.lang)
+    )
 
 
 async def cmd_battle_log(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:

@@ -150,6 +150,13 @@ RU: dict[str, str] = {
     "sum_retreat_mal": "Получена поломка.",
     "sum_use_heal": "Использован {name}: +{healed} прочности.",
     "sum_use_plain": "Использован {name}.",
+    "intro_fight": "⚔ Бой начался: {name} [{category}]",
+    "hp_player": "HP игрока: {cur}/{max}",
+    "hp_enemy": "HP противника: {cur}/{max}",
+    "victory_title": "🏆 Вы победили!",
+    "victory_reward": "Награда: {list}",
+    "victory_space": "Осталось места в инвентаре: {free}/{size}",
+    "defeat_title": "💥 Корабль выведен из строя. Дождитесь окончания ремонта (~{delay}с), после чего вы автоматически отправитесь в космопорт.",
 }
 
 EN: dict[str, str] = {
@@ -284,6 +291,13 @@ EN: dict[str, str] = {
     "sum_retreat_mal": "Malfunction gained.",
     "sum_use_heal": "Used {name}: +{healed} hull.",
     "sum_use_plain": "Used {name}.",
+    "intro_fight": "⚔ Battle started: {name} [{category}]",
+    "hp_player": "Player HP: {cur}/{max}",
+    "hp_enemy": "Enemy HP: {cur}/{max}",
+    "victory_title": "🏆 Victory!",
+    "victory_reward": "Rewards: {list}",
+    "victory_space": "Inventory space left: {free}/{size}",
+    "defeat_title": "💥 Ship disabled. Wait for repairs (~{delay}s), then you'll automatically head to the spaceport.",
 }
 
 DEFAULT_LANG = "ru"

@@ -147,3 +147,25 @@ def test_chance_label_threshold_boundaries():
 def test_chance_label_custom_thresholds():
     assert chance_label(50, low_max=60, high_min=90) == "низкая"
     assert chance_label(80, low_max=60, high_min=90) == "средняя"
+
+
+def test_hp_bar_floor_segments() -> None:
+    from core.battle import hp_bar
+
+    bar, pct = hp_bar(75, 100)
+    assert bar == "■■■■■■■□□□" and pct == 75
+    bar, pct = hp_bar(88, 100)
+    assert bar == "■■■■■■■■■□" and pct == 88
+    bar, pct = hp_bar(100, 100)
+    assert bar == "■■■■■■■■■■" and pct == 100
+    bar, pct = hp_bar(0, 100)
+    assert bar == "□□□□□□□□□□" and pct == 0
+    bar, pct = hp_bar(2462, 3325)
+    assert pct == 74 and bar.count("■") == 7  # 74% -> 7 сегментов (округление вниз)
+
+
+def test_hp_bar_zero_max() -> None:
+    from core.battle import hp_bar
+
+    bar, pct = hp_bar(0, 0)
+    assert bar == "□□□□□□□□□□" and pct == 0

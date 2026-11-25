@@ -253,7 +253,7 @@ async def test_battle_starts_from_event_outcome(session, seeded):
         {"message": "боооой!", "battle": {"enemy": "pirate_scout"}},
         random.Random(1),
     )
-    assert any("Начался бой" in e for e in effects)
+    assert any("Бой начался" in e for e in effects)
     battle = await battles.get_active_battle(session, character.id)
     assert battle is not None
     assert event.status == "resolved"

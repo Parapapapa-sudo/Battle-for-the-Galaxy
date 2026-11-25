@@ -26,10 +26,13 @@ async def _ability_handler(
     assert ctx.character_id is not None
     character = await load_character(session, ctx.character_id)
     battle = await battles.player_ability(session, character, str(args.get("cmd", "")))
-    header = await battles.describe_battle(session, battle)
-    turns = await battles.battle_journal(session, battle, limit=3)
-    lines = [header] + [f"[{t.actor}] {t.summary}" for t in turns]
-    return CommandResult(message="\n".join(lines))
+    if battle.status in ("won", "lost"):
+        return CommandResult(
+            message=await battles.describe_battle_outcome(session, battle, character.lang)
+        )
+    return CommandResult(
+        message=await battles.describe_round_result(session, battle, lang=character.lang)
+    )
 
 
 async def route_text_command(

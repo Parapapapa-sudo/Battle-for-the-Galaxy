@@ -246,7 +246,9 @@ async def _apply_outcome(
             enemy_code=str(battle_spec["enemy"]),
             expedition=expedition if expedition.status == "active" else None,
         )
-        effects.append(f"Начался бой: {battle.enemy_snapshot['name']}")
+        from app.battles import describe_battle as _battle_intro
+
+        effects.append(await _battle_intro(session, battle, lang=character.lang))
         event.status = "resolved"
         event.resolution = {
             "outcome": outcome,
@@ -492,7 +494,7 @@ def describe_event(
         int(snap.get("danger_min", 1)), int(snap.get("danger_max", 1)),
         low_max=low_max, high_min=high_min,
     )
-    label = t(f"danger_{label}", lang)
+    label = t(f"danger_{ {'низкая': 'low', 'средняя': 'medium', 'высокая': 'high'}.get(label, 'medium') }", lang)
     lines = [
         t("event_title", lang, name=snap.get("name", "?"), danger=label),
         snap.get("description", ""),

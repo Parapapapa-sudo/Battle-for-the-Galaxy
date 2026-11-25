@@ -120,3 +120,17 @@ def chance_label(pct: int, *, low_max: int = 35, high_min: int = 65) -> str:
     if pct >= high_min:
         return "высокая"
     return "средняя"
+
+
+def hp_bar(current: int, maximum: int, *, segments: int = 10) -> tuple[str, int]:
+    """Графическая полоса здоровья: ■ заполненные, □ потерянные (1 квадрат = 10%).
+
+    Возвращает (полоса, процент). Квадраты — округление вниз (75% → 7 ■),
+    процент — математическое округление.
+    """
+    if maximum <= 0:
+        return "□" * segments, 0
+    pct = max(0, min(100, round(current * 100 / maximum)))
+    # до ближайшего сегмента, половина вниз: 75% → 7 ■, 88% → 9 ■
+    filled = min(segments, int(pct / (100 / segments) + 0.4999))
+    return "■" * filled + "□" * (segments - filled), pct
