@@ -77,6 +77,30 @@ async def route_text_command(
                         session=session,
                         reply_via_outbox=False,
                     )
+                # цифровой ответ на интерактивное событие: кнопки «1»/«2» с клавиатуры
+                if cmd.isdigit():
+                    from app.expeditions import _current_offered_event, get_ongoing_expedition
+
+                    expedition = await get_ongoing_expedition(session, character.id)
+                    if expedition is not None and expedition.status == "active":
+                        offered = await _current_offered_event(session, expedition)
+                        if (
+                            offered is not None
+                            and offered.snapshot.get("kind") == "interactive"
+                            and any(
+                                str(c.get("key")) == cmd
+                                for c in offered.snapshot.get("script", {}).get("choices", [])
+                            )
+                        ):
+                            return await bus.execute(
+                                character_id=character.id,
+                                command="choice",
+                                args={"key": cmd},
+                                handler=CHARACTER_COMMANDS["choice"],
+                                idempotency_key=idempotency_key,
+                                session=session,
+                                reply_via_outbox=False,
+                            )
             if cmd in ACCOUNT_COMMANDS:
                 return await bus.execute_account(
                     account_id=account.id,

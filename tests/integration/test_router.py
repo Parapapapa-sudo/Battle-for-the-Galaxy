@@ -1,6 +1,7 @@
 """Роутер команд (путь адаптера): identity → аккаунт → скоуп, idempotency по ключу платформы."""
 import uuid
 
+import pytest
 import sqlalchemy as sa
 
 from app import characters
@@ -107,3 +108,41 @@ async def test_new_user_gets_usage_hint(session, seeded, sessions):
         text="me", idempotency_key=_key(),
     )
     assert "start" in r.message  # подсказка создания персонажа
+
+
+@requires_db
+async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
+    """Регрессия: кнопки «1»/«2» с клавиатуры шлют боту цифру — роутер связывает
+    её с вариантом активного события (иначе «Неизвестная команда: 1»)."""
+
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="start Кнопочник Тест helion", idempotency_key=_key(),
+    )
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="launch", idempotency_key=_key(),
+    )
+
+    # ищем интерактивное событие
+    for _ in range(40):
+        r = await route_text_command(
+            bus, sessions, platform="console", platform_user_id=user,
+            text="go", idempotency_key=_key(),
+        )
+        if "Отказ: decline" in r.message:  # интерактивное событие открыто
+            break
+        await route_text_command(
+            bus, sessions, platform="console", platform_user_id=user,
+            text="decline", idempotency_key=_key(),
+        )
+    else:
+        pytest.fail("интерактивное событие не встретилось")
+
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="1", idempotency_key=_key(),
+    )
+    assert "Неизвестная команда" not in r.message
