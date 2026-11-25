@@ -21,11 +21,12 @@ def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Space MMO API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
 
-    from adapters.http import admin_api, miniapp_api, payments_api
+    from adapters.http import admin_api, miniapp_api, miniapp_page, payments_api
 
     app.include_router(admin_api.router)
     app.include_router(miniapp_api.router)
     app.include_router(payments_api.router)
+    app.include_router(miniapp_page.router)
 
     @app.get("/metrics")
     async def metrics() -> Any:

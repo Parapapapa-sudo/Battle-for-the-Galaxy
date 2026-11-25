@@ -149,3 +149,57 @@ async def battle_log(
                 for t in turns
             ],
         }
+
+
+@router.get("/quests")
+async def api_quests(
+    session: AsyncSession = Depends(_session),
+    character: Character = Depends(current_character),
+) -> dict[str, Any]:
+    """Прогресс заданий и фракционных событий (экран обучения Mini App)."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import func, select
+
+    from app import quests as quests_mod
+    from app.models_game import FactionEvent, FactionEventParticipant
+
+    rows = await quests_mod.active_quests(session, character)
+    quests = [
+        {
+            "name": q.name,
+            "description": q.description,
+            "progress": [
+                {
+                    "type": o.get("type"),
+                    "have": min(int(state.progress.get(str(i), 0)), int(o.get("count", 1))),
+                    "need": int(o.get("count", 1)),
+                }
+                for i, o in enumerate(q.objectives)
+            ],
+        }
+        for state, q in rows
+    ]
+    now = datetime.now(UTC)
+    events = (
+        await session.scalars(
+            select(FactionEvent).where(
+                FactionEvent.status == "active", FactionEvent.ends_at > now
+            )
+        )
+    ).all()
+    faction_events = []
+    for event in events:
+        goal = (event.config or {}).get("goal", {})
+        total = int(
+            await session.scalar(
+                select(func.coalesce(func.sum(FactionEventParticipant.contribution), 0)).where(
+                    FactionEventParticipant.event_id == event.id
+                )
+            )
+            or 0
+        )
+        faction_events.append(
+            {"name": event.name, "progress": total, "goal": int(goal.get("count", 0))}
+        )
+    return {"quests": quests, "faction_events": faction_events}
