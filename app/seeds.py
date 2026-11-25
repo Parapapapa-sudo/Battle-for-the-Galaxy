@@ -158,7 +158,9 @@ QUESTS: list[dict[str, Any]] = [
 SHOP_OFFERS: list[dict[str, Any]] = [
     dict(code="sub_7", kind="subscription", price_eon=99, payload={"kind": "sub_7"}),
     dict(code="sub_30", kind="subscription", price_eon=249, payload={"kind": "sub_30"}),
-    dict(code="eon_pack_100", kind="pack", price_eon=0, payload={"eons": 100}),  # цена в реальных деньгах — провайдер
+    dict(code="eon_pack_100", kind="pack", price_eon=0, price_rub=100, payload={"eons": 100}),
+    dict(code="eon_pack_500", kind="pack", price_eon=0, price_rub=500, payload={"eons": 500}),
+    dict(code="eon_pack_1000", kind="pack", price_eon=0, price_rub=1000, payload={"eons": 1000}),
 ]
 
 
@@ -706,12 +708,18 @@ async def ensure_seeds(session: AsyncSession) -> dict[str, int]:
         existing = await session.scalar(
             sa.select(ShopOffer).where(ShopOffer.code == spec["code"])
         )
+        if existing is not None:
+            # актуализация цены паков (сиды — авторитет для dev-контента)
+            if spec.get("price_rub") and existing.price_rub != spec["price_rub"]:
+                existing.price_rub = spec["price_rub"]
+            continue
         if existing is None:
             session.add(
                 ShopOffer(
                     code=spec["code"],
                     kind=spec["kind"],
                     price_eon=spec["price_eon"],
+                    price_rub=spec.get("price_rub"),
                     payload=spec["payload"],
                 )
             )

@@ -83,6 +83,17 @@ async def _settle_eon_market(sessions: async_sessionmaker[AsyncSession]) -> None
             log.info("eon_market_settled", deals=deals)
 
 
+async def _sync_payments(sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
+    from adapters.payments.mock import provider_from_settings
+    from app.db import transactional
+    from app.payments import sync_pending_orders
+
+    async with sessions() as session, transactional(session):
+        synced = await sync_pending_orders(session, provider_from_settings(settings))
+        if synced:
+            log.info("payments_synced", count=synced)
+
+
 async def run_worker(
     settings: Settings,
     sessions: async_sessionmaker[AsyncSession],
@@ -112,6 +123,7 @@ async def run_worker(
                 try:
                     await bus.run_due_timers(timer_handlers=handlers)
                     await _settle_eon_market(sessions)
+                    await _sync_payments(sessions, settings)
                     await dispatcher.run_once()
                 except Exception:  # noqa: BLE001 — циклы не должны умирать
                     log.exception("worker_cycle_error")

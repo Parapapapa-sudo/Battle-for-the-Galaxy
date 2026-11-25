@@ -12,10 +12,13 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
 
-    # VK (заполняется при подключении реального бота; этап 1)
+    # VK (заполняется при подключении реального бота; локально — в .env)
     vk_bot_token: str | None = None
     vk_group_id: int | None = None
     vk_api_version: str = "5.199"
+
+    # платежи: базовый URL для webhook/pay_url мок-провайдера (в проде — публичный адрес)
+    payments_base_url: str = "http://localhost:8000"
 
     # worker
     worker_poll_interval_sec: float = 1.0

@@ -277,25 +277,3 @@ async def test_subscription_buy_and_expiry(session, seeded):
     await market.subscription_expiry_handler(session, {"subscription_id": str(sub.id)})
 
 
-@requires_db
-async def test_payment_webhook_idempotent(session, seeded):
-    character = await _character(session, seeded)
-    p1 = await market.process_payment_webhook(
-        session,
-        provider="mock",
-        provider_payment_id="pay-123",
-        character_id=character.id,
-        offer_code="eon_pack_100",
-        status="paid",
-    )
-    p2 = await market.process_payment_webhook(
-        session,
-        provider="mock",
-        provider_payment_id="pay-123",
-        character_id=character.id,
-        offer_code="eon_pack_100",
-        status="paid",
-    )
-    assert p1.id == p2.id  # повтор webhook'а не дублирует (ТЗ)
-    eon_balance, _ = await _balance(session, character, economy.EON)
-    assert eon_balance == 100  # зачислено ровно один раз

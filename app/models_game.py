@@ -657,6 +657,7 @@ class ShopOffer(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True)
     kind: Mapped[str] = mapped_column(String(16))  # pack|subscription
     price_eon: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    price_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # для pack (1 Эон = 1 ₽)
     payload: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="published")
 
@@ -809,6 +810,61 @@ class CharacterEffect(Base, TimestampMixin):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+# --- платёжный контур (0010) ---------------------------------------------------------
+
+
+class PaymentOrder(Base, TimestampMixin):
+    """Заказ у провайдера. amount_rub и eons зафиксированы при создании.
+
+    UNIQUE(provider, provider_order_id) — защита от повторного начисления (ТЗ):
+    повтор webhook с тем же провайдерским ID технически не создаст второй заказ.
+    """
+
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        sa.UniqueConstraint("provider", "provider_order_id", name="uq_provider_order"),
+        sa.UniqueConstraint("idempotency_key", name="uq_payment_idem"),
+        Index("ix_payment_orders_char", "character_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
+    )
+    offer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("shop_offers.id", ondelete="RESTRICT"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_order_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount_rub: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    eons: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), default="created"
+    )  # created|pending|paid|failed|cancelled|refunded|refund_pending_balance
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    pay_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaymentTransaction(Base):
+    """Журнал транзакций: append-only, каждый переход состояния и движение средств (ТЗ)."""
+
+    __tablename__ = "payment_transactions"
+    __table_args__ = (Index("ix_payment_tx_order", "order_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, sa.Identity(), primary_key=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("payment_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount_rub: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    eons: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    actor: Mapped[str] = mapped_column(String(32), default="system")
+    payload: Mapped[dict[str, Any] | None] = mapped_column(MutDict, nullable=True)
+
+
 __all__ = [
     "Account",
     "AccountIdentity",
@@ -847,6 +903,8 @@ __all__ = [
     "LootEntry",
     "LootTable",
     "ModerationName",
+    "PaymentOrder",
+    "PaymentTransaction",
     "ModuleInstance",
     "ModuleTemplate",
     "RecipeTemplate",
