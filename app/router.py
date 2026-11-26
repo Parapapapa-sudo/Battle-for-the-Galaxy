@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app import characters
 from app.bus import CommandBus, CommandContext, CommandResult, error_result
 from app.db import transactional
-from app.handlers import ACCOUNT_COMMANDS, CHARACTER_COMMANDS, USAGE_NO_CHARACTER, parse_command
+from app.handlers import ACCOUNT_COMMANDS, CHARACTER_COMMANDS, parse_command
+from app.locale import t
 from core.errors import DomainError
 
 
@@ -46,7 +47,7 @@ async def route_text_command(
 ) -> CommandResult:
     cmd, args = parse_command(text)
     if not cmd:
-        return CommandResult(message=USAGE_NO_CHARACTER)
+        return CommandResult(message=t("welcome_new"))
 
     async with sessions() as session, transactional(session):
         account, _created = await characters.get_or_create_account(
@@ -126,4 +127,30 @@ async def route_text_command(
 
         if character is not None:
             return CommandResult(message=f"Неизвестная команда: {cmd}")
-        return CommandResult(message=USAGE_NO_CHARACTER)
+        # онбординг: после выбора фракции любое свободное сообщение — имя капитана
+        onboarding = dict(account.onboarding or {})
+        faction_code = onboarding.get("faction")
+        if faction_code:
+            try:
+                created = await characters.create_character(
+                    session,
+                    account_id=account.id,
+                    name=text.strip(),
+                    faction_code=str(faction_code),
+                )
+            except DomainError as exc:  # имя не прошло валидацию — состояние сохраняется
+                return error_result(exc)
+            account.onboarding = {}
+            await session.flush()
+            faction = await characters.get_faction_by_code(session, str(faction_code))
+            return CommandResult(
+                message=t(
+                    "start_created",
+                    created.lang,
+                    name=created.name,
+                    faction=faction.name if faction else str(faction_code),
+                ),
+                data={"character_id": str(created.id)},
+            )
+        # новичок: приветствие + кнопка «Начать»
+        return CommandResult(message=t("welcome_new"))

@@ -40,6 +40,8 @@ LABEL_KEY = {
     "decline": "kb_decline",
     "use nano_patch": "kb_use_nano",
     "factions": "kb_factions",
+    "intro": "kb_start",
+    "intro2": "kb_continue",
 }
 
 
@@ -153,5 +155,23 @@ async def keyboard_for_character(
     )
 
 
+async def keyboard_for_account(session: AsyncSession, account: Any) -> dict[str, Any]:
+    """Клавиатура онбординга (персонажа ещё нет): шаги из account.onboarding."""
+    from app import characters
+
+    onboarding = account.onboarding or {}
+    step = onboarding.get("step")
+    if step in ("intro2", "join"):
+        factions = await characters.list_factions(session)
+        rows = [
+            [(f"join {f.code}", f.name) for f in factions[i : i + 2]]
+            for i in range(0, len(factions), 2)
+        ]
+        return vk_keyboard(rows)
+    if step == "intro":
+        return vk_keyboard([["intro2"]])
+    return vk_keyboard([["intro"]])
+
+
 async def keyboard_for_new_user(lang: str = "ru") -> dict[str, Any]:
-    return vk_keyboard([["factions"]], lang)
+    return vk_keyboard([["intro"]], lang)

@@ -29,6 +29,8 @@ class Account(Base, TimestampMixin):
     ban_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ban_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     banned_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # онбординг до создания персонажа: {"step": intro|intro2|join, "faction": code}
+    onboarding: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
 
 
 class AccountIdentity(Base, TimestampMixin):

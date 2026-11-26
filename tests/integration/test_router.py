@@ -100,14 +100,62 @@ async def test_platform_idempotency_key_prevents_duplicate_character(session, se
 
 
 @requires_db
-async def test_new_user_gets_usage_hint(session, seeded, sessions):
+async def test_new_user_gets_welcome(session, seeded, sessions):
+    """Новичок (без персонажа) получает приветствие с призывом «Начать»."""
     bus = CommandBus()
     user = f"user-{uuid.uuid4().hex[:8]}"
     r = await route_text_command(
         bus, sessions, platform="console", platform_user_id=user,
-        text="me", idempotency_key=_key(),
+        text="привет", idempotency_key=_key(),
     )
-    assert "start" in r.message  # подсказка создания персонажа
+    assert "Начать" in r.message and "битву за галактику" in r.message
+
+
+@requires_db
+async def test_onboarding_full_flow(session, seeded, sessions):
+    """Онбординг: приветствие → обзор → предыстория → фракция → имя текстом."""
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+
+    async def send(text: str):
+        return await route_text_command(
+            bus, sessions, platform="console", platform_user_id=user,
+            text=text, idempotency_key=_key(),
+        )
+
+    r = await send("привет")
+    assert "Начать" in r.message
+
+    r = await send("intro")  # кнопка «Начать»
+    assert "Твоя история начинается здесь" in r.message
+
+    r = await send("начать")  # повторный ввод текстом — снова обзор
+    assert "Твоя история начинается здесь" in r.message
+
+    r = await send("intro2")  # кнопка «Продолжить»
+    assert "Выбери фракцию" in r.message and "Конкордат" in r.message
+
+    r = await send("join lumen")  # выбор фракции кнопкой
+    assert "Синод Эонов" in r.message and "имя капитана" in r.message
+
+    # короткое имя не проходит валидацию — состояние выбора сохраняется
+    r = await send("ab")
+    assert "создан" not in r.message
+
+    r = await send("Капитан Смит")  # имя свободным текстом
+    assert "создан" in r.message and "Синод Эонов" in r.message
+
+    # персонаж создан, онбординг очищен, фракция верная
+    account, _ = await characters.get_or_create_account(
+        session, platform="console", platform_user_id=user
+    )
+    character = await characters.get_active_character(session, account.id)
+    assert character is not None and character.name == "Капитан Смит"
+    assert account.onboarding == {}
+    from app.models_game import Faction
+
+    faction = await session.get(Faction, character.faction_id)
+    assert faction is not None and faction.code == "lumen"
 
 
 @requires_db

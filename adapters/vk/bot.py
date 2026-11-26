@@ -111,8 +111,8 @@ async def _keyboard_for_user(platform_user_id: str) -> dict[str, Any]:  # keyboa
     """Меню-кнопки по состоянию игрока (read-only, ничего не создаёт)."""
     import sqlalchemy as sa
 
-    from app.keyboards import keyboard_for_character, keyboard_for_new_user
-    from app.models_game import AccountIdentity
+    from app.keyboards import keyboard_for_account, keyboard_for_character, keyboard_for_new_user
+    from app.models_game import Account, AccountIdentity
 
     async with db.session_factory() as session, db.transactional(session):
         identity = await session.scalar(
@@ -125,7 +125,10 @@ async def _keyboard_for_user(platform_user_id: str) -> dict[str, Any]:  # keyboa
             return await keyboard_for_new_user()
         character = await characters.get_active_character(session, identity.account_id)
         if character is None:
-            return await keyboard_for_new_user()
+            account = await session.get(Account, identity.account_id)
+            if account is None:
+                return await keyboard_for_new_user()
+            return await keyboard_for_account(session, account)
         return (await keyboard_for_character(session, character.id)) or (await keyboard_for_new_user())
 
 

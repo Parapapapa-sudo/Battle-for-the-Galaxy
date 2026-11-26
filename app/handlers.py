@@ -15,6 +15,7 @@ from app import battles, characters, crafting, economy, expeditions, market, mod
 from app.bus import CommandContext, CommandResult
 from app.locale import t
 from app.models_game import (
+    Account,
     Battle,
     Character,
     ExpeditionEvent,
@@ -27,10 +28,47 @@ from app.models_game import (
 from core.errors import DomainError
 from core.hull import max_hull
 
-USAGE_NO_CHARACTER = t("usage_no_character")
-
-
 # --- account scope ------------------------------------------------------------
+
+async def _account(session: AsyncSession, ctx: CommandContext) -> Account:
+    assert ctx.account_id is not None
+    account = await session.get(Account, ctx.account_id)
+    assert account is not None
+    return account
+
+
+async def cmd_intro(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Кнопка «Начать»: обзор игры. Шаг онбординга хранится на аккаунте."""
+    account = await _account(session, ctx)
+    account.onboarding = {**account.onboarding, "step": "intro"}
+    await session.flush()
+    return CommandResult(message=t("intro_overview"))
+
+
+async def cmd_intro2(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Кнопка «Продолжить»: предыстория галактики + выбор фракции (кнопки)."""
+    account = await _account(session, ctx)
+    account.onboarding = {**account.onboarding, "step": "intro2"}
+    await session.flush()
+    return CommandResult(message=t("intro_lore"))
+
+
+async def cmd_join(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Выбор фракции кнопкой: история фракции + запрос имени капитана текстом."""
+    account = await _account(session, ctx)
+    code = str(args.get("rest", "")).strip()
+    faction = await characters.get_faction_by_code(session, code)
+    if faction is None:
+        raise DomainError("unknown_faction", t("start_no_factions"))
+    account.onboarding = {"step": "join", "faction": faction.code}
+    await session.flush()
+    low = int(await stores.get_param(session, "names.min_length", 3))
+    high = int(await stores.get_param(session, "names.max_length", 24))
+    return CommandResult(
+        message=f"{faction.name}\n\n{faction.description}\n\n"
+        + t("join_prompt_name", low=low, high=high)
+    )
+
 
 async def cmd_ui(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     """Перезагрузка интерфейса: любой ответ бота несёт актуальную клавиатуру,
@@ -59,15 +97,16 @@ async def cmd_start(session: AsyncSession, ctx: CommandContext, args: dict[str, 
     assert ctx.account_id is not None
     text = str(args.get("text", "")).strip()
 
+    if not text:  # «Начать» без аргументов — шаг онбординга (как кнопка)
+        return await cmd_intro(session, ctx, args)
+
     name, faction_code = text, None
     parts = text.rsplit(maxsplit=1)
     if len(parts) == 2 and await characters.get_faction_by_code(session, parts[1]):
         name, faction_code = parts[0], parts[1]
 
     if not name:
-        factions = await characters.list_factions(session)
-        codes = ", ".join(f.code for f in factions) or t("start_no_factions")
-        return CommandResult(message=t("start_usage", codes=codes))
+        return await cmd_intro(session, ctx, args)
     if faction_code is None:
         factions = await characters.list_factions(session)
         lines = [f"{f.code} — {f.name}" for f in factions]
@@ -872,6 +911,9 @@ ACCOUNT_COMMANDS: dict[str, Any] = {
     "начать": cmd_start,
     "ui": cmd_ui,
     "меню": cmd_ui,
+    "intro": cmd_intro,
+    "intro2": cmd_intro2,
+    "join": cmd_join,
 }
 
 CHARACTER_COMMANDS: dict[str, Any] = {

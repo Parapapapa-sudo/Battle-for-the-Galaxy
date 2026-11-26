@@ -12,6 +12,41 @@ RU: dict[str, str] = {
     "factions_empty": "Фракции пока не созданы (контент не засеян).",
     "factions_title": "Фракции:",
     "ui_reloaded": "Меню обновлено.",
+    # онбординг (первый вход игрока)
+    "kb_start": "Начать", "kb_continue": "Продолжить",
+    "welcome_new": (
+        "Вступайте в битву за галактику!\n\n"
+        "Нажмите (или напишите) «Начать», чтобы зайти в игру."
+    ),
+    "intro_overview": (
+        "Это текстовая онлайн-ММО-игра «Битва за галактику»: все действия выполняются "
+        "командами под окном чата, а результаты приходят ответом от сообщества.\n\n"
+        "🚀 Тебя ждут:\n\n"
+        "Выбор одной из четырёх фракций.\n"
+        "Бесконечные космические экспедиции и случайные события.\n"
+        "Пошаговые сражения с различными противниками.\n"
+        "Развитие персонажа, корабля, способностей и навыков.\n"
+        "Поиск редких предметов, создание оборудования и улучшение модулей.\n"
+        "Торговля с другими игроками и аукцион.\n"
+        "Сюжетные задания, открытия и новые возможности.\n\n"
+        "⚔️ Исследуй. Сражайся. Развивайся.\n\n"
+        "Собирай свой корабль, находи собственный стиль игры, добывай редкие ресурсы "
+        "и стань частью истории галактики.\n\n"
+        "Твоя история начинается здесь."
+    ),
+    "intro_lore": (
+        "Долгие века галактикой правили четыре силы. Астрийский Конкордат наводил "
+        "порядок силой, Вольная Лига защищала свободу независимых миров, Пепельный "
+        "Предел выживал на забытых окраинах, а древний Синод Эонов хранил знания, "
+        "способные спасти галактику — или погубить её.\n\n"
+        "Теперь старые договоры истлевают, границы горят, и каждый капитан сам "
+        "решает, под чьим знаменем лететь.\n\n"
+        "Выбери фракцию — она определит твой стартовый корабль и бонус. "
+        "Нажми на название, чтобы узнать её историю:"
+    ),
+    "join_prompt_name": (
+        "Напиши имя капитана одним сообщением (от {low} до {high} символов) — и в бой!"
+    ),
     "start_usage": "Создание персонажа: start <имя> <код_фракции>.\nДоступные фракции: {codes}",
     "start_no_factions": "нет (контент не засеян)",
     "start_choose": "Выберите фракцию для «{name}»:\n{factions}",
@@ -185,6 +220,40 @@ EN: dict[str, str] = {
     "factions_empty": "No factions yet (content not seeded).",
     "factions_title": "Factions:",
     "ui_reloaded": "Menu reloaded.",
+    "kb_start": "Start", "kb_continue": "Continue",
+    "welcome_new": (
+        "Join the battle for the galaxy!\n\n"
+        "Press (or type) «Start» to enter the game."
+    ),
+    "intro_overview": (
+        "This is a text-based online MMO «Battle for the Galaxy»: every action is a "
+        "command below the chat window, and results arrive as community replies.\n\n"
+        "🚀 Awaiting you:\n\n"
+        "A choice of four factions.\n"
+        "Endless space expeditions and random events.\n"
+        "Turn-based battles with various enemies.\n"
+        "Progression of character, ship, abilities and skills.\n"
+        "Rare items, crafting equipment and module upgrades.\n"
+        "Trading with other players and an auction house.\n"
+        "Story quests, discoveries and new possibilities.\n\n"
+        "⚔️ Explore. Fight. Evolve.\n\n"
+        "Build your ship, find your own playstyle, gather rare resources "
+        "and become part of the galaxy's history.\n\n"
+        "Your story begins here."
+    ),
+    "intro_lore": (
+        "For centuries the galaxy was shaped by four powers. The Astrian Concord "
+        "enforced order through strength, the Free League defended the independence "
+        "of its worlds, the Ashen Reach survived on forgotten frontiers, and the "
+        "ancient Eon Synod guarded knowledge that could save the galaxy — or doom it.\n\n"
+        "Now old treaties are crumbling, borders are burning, and every captain "
+        "chooses their own banner.\n\n"
+        "Choose a faction — it defines your starting ship and bonus. "
+        "Tap a name to learn its story:"
+    ),
+    "join_prompt_name": (
+        "Send your captain's name as a single message ({low}–{high} characters) — and to battle!"
+    ),
     "start_usage": "Character creation: start <name> <faction_code>.\nAvailable factions: {codes}",
     "start_no_factions": "none (content not seeded)",
     "start_choose": "Choose a faction for «{name}»:\n{factions}",
