@@ -32,6 +32,8 @@ from app.models_game import (
     ItemTemplate,
     QuestTemplate,
     RecipeTemplate,
+    Ship,
+    ShipTemplate,
     WalletLedger,
 )
 from core.errors import DomainError
@@ -422,13 +424,26 @@ CONTENT_KINDS: dict[str, Any] = {
     "event": EventTemplate,
     "quest": QuestTemplate,
     "recipe": RecipeTemplate,
+    "ship": ShipTemplate,
 }
 _CONTENT_STATUSES = ("draft", "published", "archived")
 _QUEST_KINDS = ("tutorial", "story")
 _EVENT_KINDS = ("automatic", "interactive")
 
 
-def _content_to_dict(kind: str, row: Any) -> dict[str, Any]:
+def _content_to_dict(kind: str, row: Any, *, faction_code: str = "") -> dict[str, Any]:
+    if kind == "ship":  # у кораблей нет статуса — поля характеристик плоские
+        stats = row.base_stats or {}
+        return {
+            "code": row.code,
+            "name": row.name,
+            "faction": faction_code,
+            "max_hull": int(stats.get("max_hull", 100)),
+            "fuel_capacity": int(stats.get("fuel_capacity", 50)),
+            "attack": int(stats.get("attack", 5)),
+            "defense": int(stats.get("defense", 5)),
+            "module_slots": row.module_slots,
+        }
     base = {"code": row.code, "name": row.name, "status": row.status}
     if kind == "event":
         return base | {
@@ -461,12 +476,30 @@ def _content_to_dict(kind: str, row: Any) -> dict[str, Any]:
 
 
 async def list_content(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
-    """Весь контент трёх типов — для редакторов админ-панели."""
+    """Весь контент четырёх типов + фракции (для выпадающего списка кораблей)."""
     require_role(admin, "admin", "content_manager")
-    result: dict[str, Any] = {}
+    faction_codes = {
+        f.id: f.code for f in (await session.scalars(sa.select(Faction))).all()
+    }
+    result: dict[str, Any] = {
+        "factions": [
+            {"code": code, "name": name}
+            for code, name in (
+                await session.execute(
+                    sa.select(Faction.code, Faction.name).order_by(Faction.code)
+                )
+            ).all()
+        ]
+    }
     for kind, model in CONTENT_KINDS.items():
         rows = (await session.scalars(sa.select(model).order_by(model.code))).all()
-        result[kind + "s"] = [_content_to_dict(kind, row) for row in rows]
+        if kind == "ship":
+            result[kind + "s"] = [
+                _content_to_dict(kind, row, faction_code=faction_codes.get(row.faction_id, ""))
+                for row in rows
+            ]
+        else:
+            result[kind + "s"] = [_content_to_dict(kind, row) for row in rows]
     return result
 
 
@@ -480,9 +513,12 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
     name = str(data.get("name", "")).strip()
     if not name:
         errors.append("название обязательно")
-    status = str(data.get("status", "published")).strip()
-    if status not in _CONTENT_STATUSES:
-        errors.append(f"статус: {'|'.join(_CONTENT_STATUSES)}")
+    fields: dict[str, Any] = {"code": code, "name": name}
+    if kind != "ship":  # у кораблей нет статуса публикации
+        status = str(data.get("status", "published")).strip()
+        if status not in _CONTENT_STATUSES:
+            errors.append(f"статус: {'|'.join(_CONTENT_STATUSES)}")
+        fields["status"] = status
 
     def _int(field: str, default: int, lo: int, hi: int) -> int:
         try:
@@ -501,7 +537,6 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
             return default
         return value
 
-    fields: dict[str, Any] = {"code": code, "name": name, "status": status}
     if kind == "event":
         ekind = str(data.get("kind", "")).strip()
         if ekind not in _EVENT_KINDS:
@@ -539,6 +574,17 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
             "chain_order": _int("chain_order", 0, 0, 1000),
             "objectives": objectives,
             "rewards": _json("rewards", {}, dict),
+        }
+    elif kind == "ship":
+        fields |= {
+            "faction": str(data.get("faction", "")).strip(),  # код; в id — при записи
+            "base_stats": {
+                "max_hull": _int("max_hull", 100, 1, 100000),
+                "fuel_capacity": _int("fuel_capacity", 50, 0, 100000),
+                "attack": _int("attack", 5, 0, 10000),
+                "defense": _int("defense", 5, 0, 10000),
+            },
+            "module_slots": _int("module_slots", 3, 0, 20),
         }
     else:  # recipe
         result_code = str(data.get("result_item_code", "")).strip()
@@ -587,6 +633,9 @@ async def create_content(
     fields = _validate_content(kind, data, create=True)
     if kind == "recipe":
         await _validate_recipe_result(session, fields)
+    faction_code = str(fields.pop("faction", "") or "") if kind == "ship" else ""
+    if kind == "ship":
+        fields["faction_id"] = await _resolve_faction(session, faction_code)
     if await session.scalar(sa.select(model).where(model.code == fields["code"])) is not None:
         raise DomainError(
             "bad_content",
@@ -599,7 +648,21 @@ async def create_content(
         after={"name": fields["name"]},
     )
     await session.flush()
-    return _content_to_dict(kind, row)
+    return _content_to_dict(kind, row, faction_code=faction_code)
+
+
+async def _resolve_faction(session: AsyncSession, faction_code: str) -> Any:
+    """Код фракции → id (пусто = без фракции); несуществующая — ошибка валидации."""
+    if not faction_code:
+        return None
+    faction_id = await session.scalar(sa.select(Faction.id).where(Faction.code == faction_code))
+    if faction_id is None:
+        raise DomainError(
+            "bad_content",
+            "Ошибка при сохранении. Некорректные значения полей: "
+            f"фракция «{faction_code}» не существует",
+        )
+    return faction_id
 
 
 async def update_content(
@@ -615,16 +678,19 @@ async def update_content(
     fields = _validate_content(kind, {**data, "code": code}, create=False)
     if kind == "recipe":
         await _validate_recipe_result(session, fields)
+    faction_code = str(fields.pop("faction", "") or "") if kind == "ship" else ""
+    if kind == "ship":
+        fields["faction_id"] = await _resolve_faction(session, faction_code)
     before = _content_to_dict(kind, row)
     for key, value in fields.items():
         if key != "code":
             setattr(row, key, value)
     await audit(
         session, admin, "update_content", target_type=kind, target_id=code,
-        before=before, after=_content_to_dict(kind, row),
+        before=before, after=_content_to_dict(kind, row, faction_code=faction_code),
     )
     await session.flush()
-    return _content_to_dict(kind, row)
+    return _content_to_dict(kind, row, faction_code=faction_code)
 
 
 async def delete_content(
@@ -644,7 +710,21 @@ async def delete_content(
         raise DomainError("not_found", f"Контент «{code}» не найден.")
     before = _content_to_dict(kind, row)
     mode = "hard"
-    if kind == "quest":
+    if kind == "ship":
+        # Ship.template_id → RESTRICT: корабль игрока не даёт удалить шаблон,
+        # а архива у кораблей нет — честная ошибка вместо удаления
+        used = int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(Ship).where(Ship.template_id == row.id)
+            )
+            or 0
+        )
+        if used:
+            raise DomainError(
+                "bad_content",
+                f"Ошибка: корабль «{row.name}» используется игроками ({used}) — удаление невозможно.",
+            )
+    elif kind == "quest":
         # CharacterQuest → CASCADE: жёсткое удаление стёрло бы прогресс игроков
         used = int(
             await session.scalar(

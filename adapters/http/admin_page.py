@@ -46,6 +46,7 @@ section.active { display: block; }
 .hit .id { color: #8b96ad; font-size: 12px; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .note { color: #8b96ad; font-size: 13px; margin-top: 6px; }
+.lbl { flex: 1 1 240px; color: #9fb4ff; font-size: 13px; align-self: center; }
 </style>
 </head>
 <body>
@@ -113,6 +114,7 @@ section.active { display: block; }
         <option value="event">Событие</option>
         <option value="quest">Задание</option>
         <option value="recipe">Рецепт</option>
+        <option value="ship">Корабль</option>
       </select>
       <select id="ce-code" onchange="contentEditFill()" title="Контент"></select>
     </div>
@@ -130,6 +132,7 @@ section.active { display: block; }
         <option value="event">Событие</option>
         <option value="quest">Задание</option>
         <option value="recipe">Рецепт</option>
+        <option value="ship">Корабль</option>
       </select>
     </div>
     <div id="ca-form"></div>
@@ -286,7 +289,7 @@ async function loadEffects() {
 }
 async function cfgGet() { out(await api("GET", "/admin/config/" + $("cfg-key").value.trim()), true); }
 // --- структурированные вкладки конфигурации ---------------------------------------
-let CONFIG_SECTIONS = [];
+let CONFIG_SECTIONS = [], OPEN_SECTIONS = new Set();
 function csId(sid, key) { return "cs-" + sid + "-" + key.replace(/\./g, "_"); }
 async function loadConfigSections() {
   try {
@@ -301,20 +304,32 @@ function renderConfigSections() {
   CONFIG_SECTIONS.forEach(s => {
     const card = document.createElement("div");
     card.className = "card";
-    let html = "<h2>" + s.title + "</h2>";
+    let fields = "";
     s.fields.forEach(f => {
       const id = csId(s.id, f.key);
       if (f.type === "json") {
-        html += '<div class="note">' + f.label + '</div><div class="formrow"><textarea id="' + id + '" rows="2" class="mono">' + (f.value === null ? "" : JSON.stringify(f.value)) + "</textarea></div>";
+        fields += '<div class="formrow"><span class="lbl">' + f.label + '</span><textarea id="' + id + '" rows="2" class="mono" style="flex:2">' + (f.value === null ? "" : JSON.stringify(f.value)) + "</textarea></div>";
       } else {
-        html += '<div class="formrow"><input id="' + id + '" type="' + (f.type === "str" ? "text" : "number") + '" value="' + (f.value === null ? "" : f.value) + '" placeholder="' + f.label + '" title="' + f.label + '"></div>';
+        fields += '<div class="formrow"><span class="lbl">' + f.label + '</span><input id="' + id + '" type="' + (f.type === "str" ? "text" : "number") + '" value="' + (f.value === null ? "" : f.value) + '" style="flex:1"></div>';
       }
     });
-    html += '<div class="formrow"><button class="ghost" onclick="configSectionCancel()">Отменить изменения</button>' +
-      '<button onclick="configSectionSave(\'' + s.id + '\')">Сохранить изменения</button></div>';
-    card.innerHTML = html;
+    const open = OPEN_SECTIONS.has(s.id);
+    card.innerHTML =
+      '<div class="formrow" style="align-items:center;margin-bottom:0">' +
+      '<h2 style="flex:3;margin:0">' + s.title + ' <span class="note">(' + s.fields.length + ")</span></h2>" +
+      '<button class="ghost" style="flex:0 0 auto" onclick="toggleCard(this, \'' + s.id + '\')">' + (open ? "Скрыть" : "Показать") + "</button></div>" +
+      '<div class="card-body" style="display:' + (open ? "block" : "none") + ';margin-top:12px">' + fields +
+      '<div class="formrow"><button class="ghost" onclick="configSectionCancel()">Отменить изменения</button>' +
+      '<button onclick="configSectionSave(\'' + s.id + '\')">Сохранить изменения</button></div></div>';
     root.appendChild(card);
   });
+}
+function toggleCard(btn, sid) {
+  const body = btn.closest(".card").querySelector(".card-body");
+  const hidden = body.style.display === "none";
+  body.style.display = hidden ? "block" : "none";
+  btn.textContent = hidden ? "Скрыть" : "Показать";
+  if (hidden) OPEN_SECTIONS.add(sid); else OPEN_SECTIONS.delete(sid);
 }
 function configSectionCancel() {
   renderConfigSections();
@@ -408,11 +423,22 @@ const CONTENT_FIELDS = {
     ["cancel_return_pct", "Возврат материалов при отмене, %", "number"],
     ["status", "Статус", "select", ["published", "draft", "archived"]],
   ],
+  ship: [
+    ["code", "Код (a-z, 0-9, _)", "text"],
+    ["name", "Название", "text"],
+    ["faction", "Фракция", "faction"],
+    ["max_hull", "Прочность корпуса", "number"],
+    ["fuel_capacity", "Вместимость топлива", "number"],
+    ["attack", "Атака", "number"],
+    ["defense", "Защита", "number"],
+    ["module_slots", "Слотов под модули", "number"],
+  ],
 };
 const CONTENT_DEFAULTS = {
   event: { kind: "automatic", fuel_cost: 1, danger_min: 1, danger_max: 1, can_refuse: true, is_unique_per_expedition: false, status: "published", script: { variants: [{ weight: 1, outcome: { message: "..." } }] } },
   quest: { kind: "tutorial", chain_order: 0, objectives: [{ type: "event_resolved", count: 1 }], rewards: { quant: 100 }, status: "published" },
   recipe: { result_qty: 1, materials: [{ code: "scrap_metal", qty: 1 }], duration_sec: 60, cancel_return_pct: 50, status: "published" },
+  ship: { faction: "", max_hull: 100, fuel_capacity: 50, attack: 5, defense: 5, module_slots: 3 },
 };
 let CONTENT = null;
 async function loadContentList() {
@@ -454,6 +480,13 @@ function renderContentForm(containerId, prefix, kind, item) {
       return '<div class="formrow"><select id="' + id + '" title="' + label + '">' +
         options.map(o => '<option value="' + o + '"' + (o === value ? " selected" : "") + ">" + o + "</option>").join("") +
         '</select><span class="note" style="flex:2">' + label + "</span></div>";
+    }
+    if (type === "faction") {
+      const factions = (CONTENT && CONTENT.factions) || [];
+      const opts = '<option value="">— без фракции —</option>' + factions.map(f =>
+        '<option value="' + f.code + '"' + (f.code === value ? " selected" : "") + ">" + f.name + " (" + f.code + ")</option>"
+      ).join("");
+      return '<div class="formrow"><select id="' + id + '" title="' + label + '">' + opts + '</select><span class="note" style="flex:2">' + label + "</span></div>";
     }
     if (type === "textarea") {
       return '<div class="formrow"><textarea id="' + id + '" rows="2" placeholder="' + label + '">' + (value || "") + "</textarea></div>";

@@ -96,14 +96,15 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
   Результаты и расписание — в config_params (`tools.health_last`,
   `tools.health_interval_sec`), UI показывает время последней проверки МСК.
 - **Редактор контента** (вкладка «Контент», роль admin+content_manager):
-  события/задания/рецепты — список, создание, правка, удаление
+  события/задания/рецепты/КОРАБЛИ — список, создание, правка, удаление
   (GET/POST /admin/content[/{kind}], PUT/DELETE /admin/content/{kind}/{code}).
   Валидация per-kind в `admin._validate_content` (interactive → script.choices,
-  automatic → script.variants; рецепт → result_item_code существует).
-  Удаление: жёсткое, если нет ссылок; если контент в истории игроков
-  (ExpeditionEvent RESTRICT / CharacterQuest) — status='archived' (из игры
-  исчезает, история цела). JSON-поля (script/objectives/rewards/materials)
-  редактируются как JSON-текст в форме.
+  automatic → script.variants; рецепт → result_item_code существует; корабль →
+  характеристики в base_stats, фракция по коду, статуса у корабля НЕТ).
+  Удаление: жёсткое, если нет ссылок; события/задания в истории игроков —
+  status='archived'; корабль, которым владеют игроки (Ship RESTRICT), —
+  ошибка «используется игроками» (архива у кораблей нет).
+  JSON-поля (script/objectives/rewards/materials) редактируются как JSON-текст.
 - **Секции конфигурации** (вкладка «Конфигурация», реестр `admin.CONFIG_SECTIONS`):
   character / expedition / combat / economy + factions (прибавки из
   factions.bonuses, ключи «<faction>.<bonus>», подписи FACTION_BONUS_LABELS).

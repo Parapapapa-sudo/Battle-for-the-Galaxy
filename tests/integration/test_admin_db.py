@@ -222,6 +222,49 @@ async def test_moderator_cannot_create_effects(session, seeded):
 
 
 @requires_db
+async def test_content_editor_ships(session, seeded):
+    """Тип контента «Корабль»: создание, правка характеристик, удаление."""
+    owner, _, cm = await _admins(session)
+
+    catalog = await admin.list_content(session, cm)
+    assert catalog["ships"] and catalog["factions"]  # стартовые корабли фракций
+
+    # создание
+    ship = await admin.create_content(session, owner, "ship", {
+        "code": "test_barge", "name": "Тестовая баржа", "faction": "azimuth",
+        "max_hull": 150, "fuel_capacity": 80, "attack": 3, "defense": 8,
+        "module_slots": 4,
+    })
+    assert ship["max_hull"] == 150 and ship["faction"] == "azimuth"
+
+    # правка
+    updated = await admin.update_content(session, owner, "ship", "test_barge", {
+        "name": "Баржа v2", "faction": "", "max_hull": 200, "fuel_capacity": 90,
+        "attack": 4, "defense": 9, "module_slots": 5,
+    })
+    assert updated["name"] == "Баржа v2" and updated["faction"] == ""
+
+    # валидация: несуществующая фракция, кривая прочность
+    with pytest.raises(DomainError) as exc_info:
+        await admin.create_content(session, owner, "ship", {
+            "code": "bad_ship", "name": "X", "faction": "no_such_faction",
+        })
+    assert "фракция" in exc_info.value.message
+    with pytest.raises(DomainError):
+        await admin.update_content(session, owner, "ship", "test_barge", {
+            "name": "X", "max_hull": 0,
+        })
+
+    # удаление: свободный корабль — можно; стартовый корабль игрока — нельзя
+    result = await admin.delete_content(session, owner, "ship", "test_barge")
+    assert result["mode"] == "hard"
+    await _character(session, seeded)  # azimuth → владеет azimuth_probe
+    with pytest.raises(DomainError) as exc_info:
+        await admin.delete_content(session, owner, "ship", "azimuth_probe")
+    assert "используется игроками" in exc_info.value.message
+
+
+@requires_db
 async def test_config_sections_save_and_validate(session, seeded):
     """Вкладки конфигурации: чтение, сохранение, парные валидации, фракции."""
     owner, mod, _ = await _admins(session)
