@@ -234,7 +234,7 @@ async def _finish_win(
     rewards = [f"+{loadout.xp} опыта"] + gained
     ship_inv, inv_rows = await characters.list_inventory(session, character.id)
     free = (ship_inv.size_limit or 0) - len(inv_rows)
-    final_message = "\n".join(
+    final_message = "\n\n".join(
         [
             t("victory_title", lang),
             t("victory_reward", lang, list=", ".join(rewards)),
@@ -509,14 +509,12 @@ async def _hp_block(session: AsyncSession, battle: Battle, lang: str) -> str:
     cap = max_hull(ship.base_max_hull, ship.malfunctions)
     bar_p, pct_p = hp_bar(ship.current_hull, cap)
     bar_e, pct_e = hp_bar(int(state.get("enemy_hull", 0)), int(snap.get("max_hull", 0)))
-    return "\n".join(
-        [
-            t("hp_player", lang, cur=ship.current_hull, max=cap),
-            f"{bar_p} {pct_p}%",
-            t("hp_enemy", lang, cur=int(state.get("enemy_hull", 0)), max=int(snap.get("max_hull", 0))),
-            f"{bar_e} {pct_e}%",
-        ]
+    player = t("hp_player", lang, cur=ship.current_hull, max=cap) + f"\n{bar_p} {pct_p}%"
+    enemy = (
+        t("hp_enemy", lang, cur=int(state.get("enemy_hull", 0)), max=int(snap.get("max_hull", 0)))
+        + f"\n{bar_e} {pct_e}%"
     )
+    return player + "\n\n" + enemy
 
 
 async def describe_battle(session: AsyncSession, battle: Battle, *, lang: str = "ru") -> str:
@@ -525,15 +523,12 @@ async def describe_battle(session: AsyncSession, battle: Battle, *, lang: str = 
     snap = battle.enemy_snapshot
     passives = snap.get("passives") or {}
     weaknesses = snap.get("weaknesses") or {}
-    lines = [
-        t("intro_fight", lang, name=snap.get("name", "?"), category=snap.get("category", "?")),
-    ]
+    header = [t("intro_fight", lang, name=snap.get("name", "?"), category=snap.get("category", "?"))]
     if passives:
-        lines.append(t("battle_passives", lang, list=", ".join(passives)))
+        header.append(t("battle_passives", lang, list=", ".join(passives)))
     if weaknesses:
-        lines.append(t("battle_weaknesses", lang, list=", ".join(weaknesses)))
-    lines.append(await _hp_block(session, battle, lang))
-    return "\n".join(lines)
+        header.append(t("battle_weaknesses", lang, list=", ".join(weaknesses)))
+    return "\n".join(header) + "\n\n" + await _hp_block(session, battle, lang)
 
 
 async def describe_round_result(session: AsyncSession, battle: Battle, *, lang: str = "ru") -> str:
@@ -541,11 +536,11 @@ async def describe_round_result(session: AsyncSession, battle: Battle, *, lang: 
     Без заголовка боя, без подсказок отступления/команд."""
     # только раунд, который только что прошёл (2 строки: игрок + противник)
     turns = await battle_journal(session, battle, limit=2)
-    lines = [f"[{tr.actor}] {tr.summary}" for tr in turns]
-    lines.append(await _hp_block(session, battle, lang))
+    actions = "\n".join(f"[{tr.actor}] {tr.summary}" for tr in turns)
+    blocks = [actions, await _hp_block(session, battle, lang)]
     if battle.status == "active":
-        lines.append(t("battle_turn", lang, n=int(battle.state.get("turn_no", 1))))
-    return "\n".join(lines)
+        blocks.append(t("battle_turn", lang, n=int(battle.state.get("turn_no", 1))))
+    return "\n\n".join(blocks)
 
 
 async def describe_battle_outcome(session: AsyncSession, battle: Battle, lang: str) -> str:

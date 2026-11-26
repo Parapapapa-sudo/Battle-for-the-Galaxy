@@ -610,13 +610,11 @@ async def describe_travel(
 
     lang = character.lang
     bar, pct = hp_bar(expedition.fuel_remaining, max(1, expedition.fuel_at_start))
-    return "\n".join(
-        [
-            t("travel_started", lang),
-            t("fuel_line", lang, cur=expedition.fuel_remaining, max=expedition.fuel_at_start),
-            f"{bar} {pct}%",
-        ]
+    fuel_block = (
+        t("fuel_line", lang, cur=expedition.fuel_remaining, max=expedition.fuel_at_start)
+        + f"\n{bar} {pct}%"
     )
+    return "\n\n".join([t("travel_started", lang), fuel_block])
 
 
 # --- «Залатать корабль» (ремонт в экспедиции) -------------------------------------
@@ -717,13 +715,15 @@ def describe_event(
         low_max=low_max, high_min=high_min,
     )
     label = t(f"danger_{ {'низкая': 'low', 'средняя': 'medium', 'высокая': 'high'}.get(label, 'medium') }", lang)
-    lines = [
+    # блоки через пустую строку: заголовок / описание / исход с эффектами
+    blocks = [
         t("event_title", lang, name=snap.get("name", "?"), danger=label),
         snap.get("description", ""),
     ]
     if event.status == "resolved":
         outcome = (event.resolution or {}).get("outcome", {})
-        lines.append(t("event_outcome", lang, message=outcome.get("message", "")))
+        outcome_lines = [t("event_outcome", lang, message=outcome.get("message", ""))]
         for effect in (event.resolution or {}).get("effects", []):
-            lines.append(f"— {effect}")
-    return "\n".join(line for line in lines if line)
+            outcome_lines.append(f"— {effect}")
+        blocks.append("\n".join(outcome_lines))
+    return "\n\n".join(block for block in blocks if block)

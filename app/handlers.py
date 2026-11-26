@@ -249,7 +249,7 @@ async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, An
         wait = max(1, int((expedition.patch_eta - datetime.now(UTC)).total_seconds()) + 1)
         return CommandResult(
             message=await expeditions.describe_ship_status(session, character)
-            + "\n"
+            + "\n\n"
             + t("patch_eta_line", lang, wait=wait)
         )
     offered = await expeditions._current_offered_event(session, expedition)
@@ -259,7 +259,7 @@ async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, An
         wait = int((expedition.next_event_at - datetime.now(UTC)).total_seconds()) + 1
         return CommandResult(
             message=await expeditions.describe_travel(session, character, expedition)
-            + "\n"
+            + "\n\n"
             + t("travel_eta", lang, wait=wait)
         )
     low = int(await stores.get_param(session, "danger.low_max", 3))
@@ -278,8 +278,8 @@ async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, An
         start=expedition.fuel_at_start,
     )
     if last is not None and last.status == "resolved":
-        text += "\n" + expeditions.describe_event(last, lang=lang, low_max=low, high_min=high)
-    text += "\n" + t("exp_hint", lang)
+        text += "\n\n" + expeditions.describe_event(last, lang=lang, low_max=low, high_min=high)
+    text += "\n\n" + t("exp_hint", lang)
     return CommandResult(message=text)
 
 
