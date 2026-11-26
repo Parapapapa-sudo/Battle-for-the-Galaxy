@@ -117,12 +117,12 @@ async def test_tutorial_chain_progression(session, seeded, bus):
     assert active and active[0][1].code in ("tutorial_2", "tutorial_3")
 
     # шаг 3: победа в бою (засада могла начать бой уже на шаге 2)
-    # события шага 2 могли рандомно повредить корпус — чиним, чтобы бой был детерминирован
+    # буст корпуса: бой против любого пирата детерминированно выигрышный
+    # (капитан: 120 HP / 16 урона — игрок успевает убить за ≤60 ходов, сам не умирает)
     ship = await session.get(Ship, character.id)
     assert ship is not None
-    from core.hull import max_hull
-
-    ship.current_hull = max_hull(ship.base_max_hull, ship.malfunctions)
+    ship.base_max_hull = 2000
+    ship.current_hull = 2000
     await session.flush()
     battle = await battles.get_active_battle(session, character.id)
     if battle is None:
@@ -130,7 +130,7 @@ async def test_tutorial_chain_progression(session, seeded, bus):
             session, character, enemy_code="pirate_scout", expedition=expedition
         )
     rng = random.Random(5)
-    for _ in range(50):
+    for _ in range(60):
         battle = await battles.player_attack(session, character, rng=rng)
         if battle.status != "active":
             break
@@ -159,13 +159,13 @@ async def test_tutorial_chain_progression(session, seeded, bus):
         active = await quests.active_quests(session, character)
         if not active or active[0][1].code != "tutorial_3":
             break
-        ship.current_hull = max_hull(ship.base_max_hull, ship.malfunctions)
+        ship.current_hull = 2000  # буст из шага 3 — бой выигрышный
         await session.flush()
         battle = await battles.start_battle(
             session, character, enemy_code="pirate_scout", expedition=expedition
         )
         rng = random.Random(5)
-        for _ in range(50):
+        for _ in range(60):
             battle = await battles.player_attack(session, character, rng=rng)
             if battle.status != "active":
                 break

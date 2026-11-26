@@ -111,6 +111,31 @@ async def test_new_user_gets_usage_hint(session, seeded, sessions):
 
 
 @requires_db
+async def test_ui_command_reloads_menu(session, seeded, sessions):
+    """«ui» — перезагрузка интерфейса: работает и без персонажа, и с ним."""
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+
+    # без персонажа
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="ui", idempotency_key=_key(),
+    )
+    assert "Меню обновлено" in r.message
+
+    # с персонажем (русский алиас)
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="start Юай Тестов azimuth", idempotency_key=_key(),
+    )
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="меню", idempotency_key=_key(),
+    )
+    assert "Меню обновлено" in r.message
+
+
+@requires_db
 async def test_hall_navigation_commands(session, seeded, sessions):
     """Залы космопорта: hall workshop/hq/main меняет зал; в экспедиции — нельзя."""
     bus = CommandBus()

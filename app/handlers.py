@@ -32,6 +32,18 @@ USAGE_NO_CHARACTER = t("usage_no_character")
 
 # --- account scope ------------------------------------------------------------
 
+async def cmd_ui(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Перезагрузка интерфейса: любой ответ бота несёт актуальную клавиатуру,
+    поэтому короткое «ui» — способ вернуть кнопки, если они не подгрузились."""
+    character = (
+        await characters.get_active_character(session, ctx.account_id)
+        if ctx.account_id is not None
+        else None
+    )
+    lang = character.lang if character is not None else "ru"
+    return CommandResult(message=t("ui_reloaded", lang))
+
+
 async def cmd_factions(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     factions = await characters.list_factions(session)
     if not factions:
@@ -858,6 +870,8 @@ ACCOUNT_COMMANDS: dict[str, Any] = {
     "start": cmd_start,
     "factions": cmd_factions,
     "начать": cmd_start,
+    "ui": cmd_ui,
+    "меню": cmd_ui,
 }
 
 CHARACTER_COMMANDS: dict[str, Any] = {
