@@ -147,12 +147,19 @@ section.active { display: block; }
     </div>
   </div></section>
 
-  <section data-tab="analytics"><div class="card"><h2>Аналитика</h2>
-    <button onclick="loadAnalytics()">Загрузить</button>
-    <div id="analytics" class="result" style="display:none"></div>
+  <section data-tab="analytics">
+  <div class="card"><h2>Нагрузка на сервер</h2>
+    <button class="ghost" onclick="toggleSection('srvload', loadServerLoad, this)">Показать</button>
+    <div id="srvload" class="result" style="display:none"></div>
+  </div>
+  <div class="card"><h2>Аналитика игрового мира</h2>
+    <button class="ghost" onclick="toggleSection('world', loadWorldAnalytics, this)">Показать</button>
+    <div id="world" class="result" style="display:none"></div>
   </div>
   <div class="card"><h2>Журнал аудита</h2>
-    <button class="ghost" onclick="alert('Просмотр audit_log — через SQL (psql) или по запросу разработчику')">Где смотреть</button>
+    <button class="ghost" onclick="toggleSection('auditlog', loadAuditLog, this)">Показать</button>
+    <div id="auditlog" class="result" style="display:none"></div>
+    <div class="note">Последние 50 действий администрации. Время — московское.</div>
   </div></section>
 </main>
 <div id="out"></div>
@@ -355,10 +362,52 @@ function cancelItem() {
   ITEM_MODE = null;
   out("Изменения отменены", true);
 }
-async function loadAnalytics() {
+// --- аналитика: три раздела с кнопкой «Показать» --------------------------------
+async function toggleSection(id, loader, btn) {
+  const el = $(id);
+  if (el.style.display === "none") {
+    await loader();
+    el.style.display = "block";
+    btn.textContent = "Скрыть";
+  } else {
+    el.style.display = "none";
+    btn.textContent = "Показать";
+  }
+}
+function fmtUptime(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return (h ? h + " ч " : "") + (m ? m + " мин " : "") + s + " с";
+}
+async function loadServerLoad() {
+  const d = await api("GET", "/admin/server-load");
+  $("srvload").textContent = [
+    "Загрузка CPU процессом API: " + d.cpu_percent + "% (ядер на машине: " + d.cpu_cores + ")",
+    "Память процесса API: " + (d.memory_mb === null ? "н/д" : d.memory_mb + " МБ"),
+    "Аптайм API: " + fmtUptime(d.uptime_sec),
+    "Размер базы данных: " + d.db_size_mb + " МБ",
+    "Подключений к БД: " + d.db_connections,
+    "Таймеров в очереди: " + d.timers_pending,
+    "Сообщений outbox: ожидают " + d.outbox_pending + ", с ошибкой " + d.outbox_failed,
+  ].join("\n");
+}
+async function loadWorldAnalytics() {
   const d = await api("GET", "/admin/analytics");
-  $("analytics").style.display = "block";
-  $("analytics").textContent = JSON.stringify(d, null, 2);
+  const lines = [
+    "Всего персонажей: " + d.total_characters,
+    "Экспедиций за сутки: " + d.expeditions_today,
+    "Боёв за сутки: " + d.battles_today,
+    "Оборот рынка за сутки: " + d.market_volume_quant_today + " квантов",
+    "Воронка обучения (завершили задание):",
+  ];
+  (d.tutorial_funnel || []).forEach(f => lines.push("  — «" + f.name + "»: " + f.completed));
+  if (!(d.tutorial_funnel || []).length) lines.push("  — пока никто не завершил ни одного задания");
+  $("world").textContent = lines.join("\n");
+}
+async function loadAuditLog() {
+  const d = await api("GET", "/admin/audit-log");
+  $("auditlog").textContent = (d.entries || [])
+    .map(e => e.time_msk + " · " + e.actor + " · " + e.summary)
+    .join("\n") || "Журнал пуст.";
 }
 $("key").value = localStorage.getItem("admin-key") || "";
 if ($("key").value) saveKey(); else renderTabs();

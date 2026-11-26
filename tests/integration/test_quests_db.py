@@ -153,6 +153,24 @@ async def test_tutorial_chain_progression(session, seeded, bus):
                 session, character, str(safe["key"]), rng=random.Random(1)
             )
 
+    # прогресс засчитывается только АКТИВНОМУ заданию: если победа в бою случилась
+    # до активации tutorial_3, дерёмся ещё раз — уже под активным заданием
+    for _ in range(3):
+        active = await quests.active_quests(session, character)
+        if not active or active[0][1].code != "tutorial_3":
+            break
+        ship.current_hull = max_hull(ship.base_max_hull, ship.malfunctions)
+        await session.flush()
+        battle = await battles.start_battle(
+            session, character, enemy_code="pirate_scout", expedition=expedition
+        )
+        rng = random.Random(5)
+        for _ in range(50):
+            battle = await battles.player_attack(session, character, rng=rng)
+            if battle.status != "active":
+                break
+        assert battle.status == "won"
+
     active = await quests.active_quests(session, character)
     assert active and active[0][1].code == "story_1"
 

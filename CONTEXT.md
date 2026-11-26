@@ -82,6 +82,11 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
   `drop_qty_min/max`. Дроп бросается в `expeditions._roll_expedition_drop` после
   каждого НЕбоевого исхода события (у врагов — свои loot_tables). API:
   GET/POST /admin/items, PUT /admin/items/{code}.
+- **Аналитика админки** (вкладка «Аналитика», разделы раскрываются «Показать»):
+  нагрузка на сервер (CPU/память процесса API через stdlib — psutil НЕТ, БД,
+  очереди timers/outbox — `admin.server_load`, GET /admin/server-load);
+  игровой мир человекочитаемо (`admin.analytics`); журнал аудита — время МСК,
+  ключ, краткая суть (`admin.audit_log_view`, GET /admin/audit-log).
 
 ## Ключевые правила ТЗ (не сломать!)
 

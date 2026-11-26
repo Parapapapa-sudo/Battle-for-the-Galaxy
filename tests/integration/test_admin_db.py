@@ -222,6 +222,36 @@ async def test_moderator_cannot_create_effects(session, seeded):
 
 
 @requires_db
+async def test_server_load_and_audit_log_view(session, seeded):
+    """Аналитика: нагрузка на сервер + журнал аудита (время МСК, ключ, суть)."""
+    import re
+
+    owner, mod, _ = await _admins(session)
+
+    load = await admin.server_load(session, owner)
+    assert load["cpu_cores"] >= 1
+    assert load["db_size_mb"] > 0
+    assert load["db_connections"] >= 1
+    assert load["uptime_sec"] >= 0
+    with pytest.raises(DomainError) as exc_info:
+        await admin.server_load(session, mod)
+    assert exc_info.value.code == "forbidden"
+
+    # действие админа попадает в журнал: время МСК, ключ, суть
+    await admin.set_config(session, owner, "inventory.base_size", 40)
+    log = await admin.audit_log_view(session, owner)
+    assert log["entries"]
+    first = log["entries"][0]
+    assert "owner (admin)" in first["actor"]
+    assert "изменил конфиг" in first["summary"]
+    assert "inventory.base_size" in first["summary"]
+    assert re.fullmatch(r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}", first["time_msk"])
+    with pytest.raises(DomainError) as exc_info:
+        await admin.audit_log_view(session, mod)
+    assert exc_info.value.code == "forbidden"
+
+
+@requires_db
 async def test_analytics_mvp(session, seeded):
     owner, _, _ = await _admins(session)
     await _character(session, seeded)

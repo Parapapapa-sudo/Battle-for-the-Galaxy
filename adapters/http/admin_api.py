@@ -170,6 +170,24 @@ async def analytics(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
             _guard(exc)
 
 
+@router.get("/server-load")
+async def server_load(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.server_load(session, adm)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.get("/audit-log")
+async def audit_log(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.audit_log_view(session, adm)
+        except DomainError as exc:
+            _guard(exc)
+
+
 @router.post("/admins")
 async def create_admin(
     body: dict[str, Any], adm: AdminUser = Depends(current_admin)

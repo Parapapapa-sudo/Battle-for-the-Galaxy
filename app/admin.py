@@ -8,6 +8,7 @@
 - балансировочные параметры редактируются без изменения кода и без перезапуска (ТЗ).
 """
 import hashlib
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -416,6 +417,154 @@ async def update_item(
 
 # --- аналитика (MVP) -------------------------------------------------------------------
 
+# МСК без перехода на летнее время (UTC+3) — для журнала аудита в админ-панели
+_MSK = timedelta(hours=3)
+_STARTED_MONO = time.monotonic()  # аптайм процесса, поднявшего модуль
+
+_AUDIT_ACTION_LABELS = {
+    "set_config": "изменил конфиг",
+    "ban_account": "забанил аккаунт",
+    "unban_account": "разбанил аккаунт",
+    "apply_effect": "наложил эффект",
+    "set_content_status": "сменил статус контента",
+    "create_admin": "создал администратора",
+    "create_item": "создал предмет",
+    "update_item": "изменил предмет",
+}
+
+
+def _rss_mb() -> float | None:
+    """Память процесса (RSS/рабочий набор), МБ. stdlib: psapi (Windows) / resource (POSIX)."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", wt.DWORD), ("PageFaultCount", wt.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = _PMC()
+        counters.cb = ctypes.sizeof(counters)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = wt.HANDLE  # иначе хендл режется до int
+        psapi = ctypes.windll.psapi
+        psapi.GetProcessMemoryInfo.argtypes = [wt.HANDLE, ctypes.c_void_p, wt.DWORD]
+        psapi.GetProcessMemoryInfo.restype = wt.BOOL
+        if psapi.GetProcessMemoryInfo(
+            kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb
+        ):
+            return round(float(counters.WorkingSetSize) / 1024 / 1024, 1)
+    except (AttributeError, OSError):
+        try:
+            import resource
+
+            usage = resource.getrusage(resource.RUSAGE_SELF)  # type: ignore[attr-defined]
+            return round(float(usage.ru_maxrss) / 1024, 1)
+        except Exception:  # noqa: BLE001 — метрика опциональна
+            return None
+    return None
+
+
+async def server_load(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
+    """Нагрузка на сервер: CPU/память процесса API + состояние БД и очередей."""
+    import asyncio
+    import os
+
+    require_role(admin, "admin")
+    t0 = os.times()
+    await asyncio.sleep(0.2)  # окно замера CPU
+    t1 = os.times()
+    cpu_pct = round(((t1.user - t0.user) + (t1.system - t0.system)) / 0.2 * 100)
+
+    db_size = int(await session.scalar(sa.text("SELECT pg_database_size(current_database())")) or 0)
+    db_conns = int(
+        await session.scalar(
+            sa.text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()")
+        )
+        or 0
+    )
+    from app.models import Outbox, Timer
+
+    timers_pending = int(
+        await session.scalar(
+            sa.select(sa.func.count()).select_from(Timer).where(Timer.status == "pending")
+        )
+        or 0
+    )
+    outbox_pending = int(
+        await session.scalar(
+            sa.select(sa.func.count()).select_from(Outbox).where(Outbox.status == "pending")
+        )
+        or 0
+    )
+    outbox_failed = int(
+        await session.scalar(
+            sa.select(sa.func.count()).select_from(Outbox).where(Outbox.status == "failed")
+        )
+        or 0
+    )
+    return {
+        "cpu_percent": cpu_pct,
+        "cpu_cores": os.cpu_count() or 1,
+        "memory_mb": _rss_mb(),
+        "uptime_sec": int(time.monotonic() - _STARTED_MONO),
+        "db_size_mb": round(db_size / 1024 / 1024, 1),
+        "db_connections": db_conns,
+        "timers_pending": timers_pending,
+        "outbox_pending": outbox_pending,
+        "outbox_failed": outbox_failed,
+    }
+
+
+def _audit_summary(row: AuditLog) -> str:
+    """Одна строка о сути изменения: действие + цель + краткая деталь.
+
+    Подробности не нужны (ТЗ заказчика): для конфига — новое значение, для
+    правок сущностей — список изменённых полей, для создания — имя объекта.
+    """
+    import json
+
+    label = _AUDIT_ACTION_LABELS.get(row.action, row.action)
+    target = f" {row.target_id}" if row.target_id else ""
+    detail = ""
+    if row.action == "set_config" and row.after is not None:
+        value = json.dumps(row.after.get("value"), ensure_ascii=False, default=str)[:40]
+        detail = f" → {value}"
+    elif row.after is not None and row.before is not None:
+        changed = [k for k, v in row.after.items() if row.before.get(k) != v]
+        if changed:
+            detail = " — поля: " + ", ".join(changed[:6])
+    elif row.after is not None and row.after.get("name"):
+        detail = f" — «{row.after['name']}»"
+    elif row.after is not None and row.after.get("effect"):
+        detail = f" — {row.after['effect']}"
+    return f"{label}{target}{detail}"
+
+
+async def audit_log_view(
+    session: AsyncSession, admin: AdminUser, *, limit: int = 50
+) -> dict[str, Any]:
+    """Журнал аудита для админ-панели: время МСК, ключ, суть изменения."""
+    require_role(admin, "admin")
+    rows = (
+        await session.scalars(sa.select(AuditLog).order_by(AuditLog.id.desc()).limit(limit))
+    ).all()
+    return {
+        "entries": [
+            {
+                "time_msk": (row.at + _MSK).strftime("%d.%m.%Y %H:%M:%S"),
+                "actor": f"{row.actor_id} ({row.actor_role})",
+                "summary": _audit_summary(row),
+            }
+            for row in rows
+        ]
+    }
+
 
 async def whoami(admin: AdminUser) -> dict[str, Any]:
     """Информация о ключе — для UI (показ роли и доступных разделов)."""
@@ -489,10 +638,10 @@ async def analytics(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
     # воронка обучения: сколько персонажей завершили каждое задание
     funnel_rows = (
         await session.execute(
-            sa.select(QuestTemplate.code, sa.func.count())
+            sa.select(QuestTemplate.code, QuestTemplate.name, sa.func.count())
             .join(CharacterQuest, CharacterQuest.quest_id == QuestTemplate.id)
             .where(CharacterQuest.status == "completed")
-            .group_by(QuestTemplate.code, QuestTemplate.chain_order)
+            .group_by(QuestTemplate.code, QuestTemplate.name, QuestTemplate.chain_order)
             .order_by(QuestTemplate.chain_order)
         )
     ).all()
@@ -501,5 +650,8 @@ async def analytics(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
         "expeditions_today": expeditions_today,
         "battles_today": battles_today,
         "market_volume_quant_today": market_volume,
-        "tutorial_funnel": {code: count for code, count in funnel_rows},
+        "tutorial_funnel": [
+            {"code": code, "name": name, "completed": count}
+            for code, name, count in funnel_rows
+        ],
     }
