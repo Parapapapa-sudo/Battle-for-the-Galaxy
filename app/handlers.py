@@ -510,28 +510,32 @@ async def cmd_recipes(session: AsyncSession, ctx: CommandContext, args: dict[str
     recipes = await crafting.list_recipes(session, character)
     if not recipes:
         return CommandResult(message=t("recipes_empty", lang))
-    lines = []
+    blocks = [t("recipes_title", lang)]
     for r in recipes:
-        mark = t("recipe_ready", lang) if r["can_craft"] else t("recipe_no_materials", lang)
-        lines.append(
-            t(
-                "recipe_line",
-                lang,
-                code=r["code"],
-                name=r["name"],
-                qty=r["result"]["qty"],
-                result=r["result"]["code"],
-                duration=r["duration_sec"],
-                mark=mark,
-            )
+        mats = ", ".join(
+            t("recipe_mat_item", lang, name=m["name"], have=min(m["have"], m["need"]), need=m["need"])
+            for m in r["materials"]
         )
-        if r["missing"]:
-            missing = ", ".join(f"{m['lack']}× {m['code']}" for m in r["missing"])
-            lines.append(t("recipe_missing", lang, list=missing))
+        status = t("recipe_ready", lang, code=r["code"]) if r["can_craft"] else t(
+            "recipe_no_materials", lang, code=r["code"]
+        )
+        block = t(
+            "recipe_line",
+            lang,
+            name=r["name"],
+            qty=r["result"]["qty"],
+            result=r["result"]["name"],
+            duration=r["duration_sec"],
+        )
+        if mats:
+            block += "\n" + t("recipe_materials", lang, list=mats)
+        block += "\n" + status
+        blocks.append(block)
     jobs = await crafting.running_jobs(session, character)
     if jobs:
-        lines.append(t("recipes_slots", lang, used=len(jobs), total=character.craft_slots))
-    return CommandResult(message=t("recipes_title", lang) + "\n" + "\n".join(lines))
+        blocks.append(t("recipes_slots", lang, used=len(jobs), total=character.craft_slots))
+    blocks.append(t("recipes_hint", lang))
+    return CommandResult(message="\n\n".join(blocks))
 
 
 async def cmd_craft(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:

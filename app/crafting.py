@@ -36,7 +36,9 @@ async def _require_port(session: AsyncSession, character: Character) -> None:
 
 
 async def list_recipes(session: AsyncSession, character: Character) -> list[dict[str, Any]]:
-    """Рецепты с пометкой доступности и списком нехватающих материалов."""
+    """Рецепты с пометкой доступности, именами предметов и нехваткой материалов."""
+    from app.models_game import ItemTemplate
+
     recipes = (
         await session.scalars(
             sa.select(RecipeTemplate).where(RecipeTemplate.status == "published")
@@ -44,18 +46,43 @@ async def list_recipes(session: AsyncSession, character: Character) -> list[dict
     ).all()
     _, rows = await characters.list_inventory(session, character.id)
     owned = {r.code: r.qty for r in rows}
+    # имена предметов одним запросом — коды игроку не показываем
+    codes = {r.result_item_code for r in recipes} | {
+        str(mat["code"]) for r in recipes for mat in r.materials
+    }
+    names = {
+        code: name
+        for code, name in (
+            await session.execute(
+                sa.select(ItemTemplate.code, ItemTemplate.name).where(
+                    ItemTemplate.code.in_(codes)
+                )
+            )
+        ).all()
+    }
     result = []
     for recipe in recipes:
+        materials = []
         missing = []
         for mat in recipe.materials:
-            lack = int(mat["qty"]) - owned.get(str(mat["code"]), 0)
-            if lack > 0:
-                missing.append({"code": mat["code"], "lack": lack})
+            code = str(mat["code"])
+            need = int(mat["qty"])
+            have = owned.get(code, 0)
+            materials.append(
+                {"code": code, "name": names.get(code, code), "need": need, "have": have}
+            )
+            if have < need:
+                missing.append({"code": code, "name": names.get(code, code), "lack": need - have})
         result.append(
             {
                 "code": recipe.code,
                 "name": recipe.name,
-                "result": {"code": recipe.result_item_code, "qty": recipe.result_qty},
+                "result": {
+                    "code": recipe.result_item_code,
+                    "name": names.get(recipe.result_item_code, recipe.result_item_code),
+                    "qty": recipe.result_qty,
+                },
+                "materials": materials,
                 "duration_sec": recipe.duration_sec,
                 "can_craft": not missing,
                 "missing": missing,

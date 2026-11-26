@@ -165,6 +165,26 @@ async def test_onboarding_full_flow(session, seeded, sessions):
 
 
 @requires_db
+async def test_recipes_screen_human_readable(session, seeded, sessions):
+    """Рецепты: названия вместо кодов, материалы есть/нужно, статус и команда."""
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="start Крафтер Тестов azimuth", idempotency_key=_key(),
+    )
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="recipes", idempotency_key=_key(),
+    )
+    assert "«Нанопластырь» → 1× Нанопластырь (45 с)" in r.message
+    assert "Материалы: Металлолом 3/3" in r.message  # стартовый лом покрывает рецепт
+    assert "✅ Готов · craft craft_nano_patch" in r.message
+    assert "nano_patch (" not in r.message  # сырых кодов предметов нет
+    assert "Создание: craft <код>" in r.message
+
+
+@requires_db
 async def test_shop_display_and_buy_flow(session, seeded, sessions):
     """Магазин: человекочитаемая витрина; паки Эонов — счёт в рублях, подписки — за Эоны."""
     bus = CommandBus()
