@@ -130,6 +130,37 @@ async def set_content_status(
             _guard(exc)
 
 
+@router.get("/items")
+async def items_list(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.list_items(session, adm)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.post("/items")
+async def item_create(
+    body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.create_item(session, adm, body)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.put("/items/{code}")
+async def item_update(
+    code: str, body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.update_item(session, adm, code, body)
+        except DomainError as exc:
+            _guard(exc)
+
+
 @router.get("/analytics")
 async def analytics(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
     async with session_factory() as session, transactional(session):

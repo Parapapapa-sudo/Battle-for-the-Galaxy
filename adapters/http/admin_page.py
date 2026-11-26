@@ -107,6 +107,46 @@ section.active { display: block; }
     <button onclick="setContent()">Применить статус</button>
   </div></section>
 
+  <section data-tab="items">
+  <div class="card"><h2>Предметы</h2>
+    <div class="formrow">
+      <button class="ghost" onclick="itemsMode('edit')">Изменить параметры предмета</button>
+      <button class="ghost" onclick="itemsMode('create')">Добавить новый предмет</button>
+    </div>
+    <div class="formrow" id="item-select-row" style="display:none">
+      <select id="item-select" onchange="fillItemForm()"></select>
+    </div>
+  </div>
+  <div class="card" id="item-form" style="display:none"><h2 id="item-form-title">Предмет</h2>
+    <div class="formrow">
+      <input id="it-code" placeholder="Код предмета (a-z, 0-9, _)">
+      <input id="it-name" placeholder="Название предмета">
+    </div>
+    <div class="formrow"><textarea id="it-desc" rows="2" placeholder="Описание"></textarea></div>
+    <div class="formrow">
+      <select id="it-category" title="Тип предмета"></select>
+      <select id="it-rarity" title="Редкость"></select>
+      <input id="it-stack" type="number" min="1" placeholder="Лимит стека" title="Лимит стека">
+    </div>
+    <div class="formrow" style="align-items:center">
+      <label><input type="checkbox" id="it-unique"> Уникальный</label>
+      <label><input type="checkbox" id="it-sellable" checked> Продаваемый</label>
+      <label><input type="checkbox" id="it-tradable" checked> Обмениваемый</label>
+      <label><input type="checkbox" id="it-losable"> Теряется при поражении</label>
+    </div>
+    <div class="formrow">
+      <input id="it-drop-weight" type="number" min="0" max="100" placeholder="Вероятность выпадения, %" title="Вероятность выпадения в экспедиции, %">
+      <input id="it-qty-min" type="number" min="1" placeholder="Количество: от" title="Количество выпадаемых предметов: от">
+      <input id="it-qty-max" type="number" min="1" placeholder="Количество: до" title="Количество выпадаемых предметов: до">
+    </div>
+    <div class="note">Вероятность (0–100%) и диапазон количества — бонусный дроп после события экспедиции; 0% — предмет не выпадает.</div>
+    <div class="formrow" style="margin-top:8px"><input id="it-params" placeholder='Параметры JSON, напр. {"heal": 15}'></div>
+    <div class="formrow">
+      <button class="ghost" onclick="cancelItem()">Отменить</button>
+      <button onclick="saveItem()">Сохранить</button>
+    </div>
+  </div></section>
+
   <section data-tab="analytics"><div class="card"><h2>Аналитика</h2>
     <button onclick="loadAnalytics()">Загрузить</button>
     <div id="analytics" class="result" style="display:none"></div>
@@ -122,6 +162,7 @@ const TABS = [
   ["config", "Конфигурация", ["admin"]],
   ["moderation", "Модерация", ["admin", "moderator"]],
   ["content", "Контент", ["admin", "content_manager"]],
+  ["items", "Предметы", ["admin"]],
   ["analytics", "Аналитика", ["admin"]],
 ];
 let ROLE = null, CHOSEN = null;
@@ -135,10 +176,14 @@ function out(text, ok) {
   el.textContent = typeof text === "string" ? text : JSON.stringify(text, null, 2);
   $("out").prepend(el);
 }
-async function api(method, path, body) {
+async function api(method, path, body, silent) {
   const r = await fetch(path, { method, headers: H(), body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) { out(data.detail || ("HTTP " + r.status), false); throw new Error(data.detail); }
+  if (!r.ok) {
+    const msg = data.detail || ("HTTP " + r.status);
+    if (!silent) out(msg, false);
+    throw new Error(msg);
+  }
   return data;
 }
 function renderTabs() {
@@ -170,6 +215,7 @@ async function saveKey() {
     renderTabs();
     out("Ключ принят: " + me.login + " (" + me.role + ")", true);
     loadEffects();
+    if (me.role === "admin") loadItems();
   } catch (e) { ROLE = null; $("role").textContent = "ключ не принят"; renderTabs(); }
 }
 async function loadEffects() {
@@ -218,6 +264,96 @@ async function applyEffect() {
 }
 async function setContent() {
   out(await api("POST", "/admin/content/" + $("ct-table").value + "/" + $("ct-code").value.trim() + "/status", { status: $("ct-status").value }), true);
+}
+// --- предметы -----------------------------------------------------------------
+let ITEM_MODE = null, ITEMS = [];
+async function loadItems() {
+  try {
+    const d = await api("GET", "/admin/items");
+    ITEMS = d.items;
+    $("item-select").innerHTML = ITEMS.map(i => '<option value="' + i.code + '">' + i.name + " (" + i.code + ")</option>").join("");
+    $("it-category").innerHTML = d.categories.map(c => '<option value="' + c + '">' + c + "</option>").join("");
+    $("it-rarity").innerHTML = d.rarities.map(r => '<option value="' + r + '">' + r + "</option>").join("");
+  } catch (e) {}
+}
+function itemsMode(mode) {
+  ITEM_MODE = mode;
+  $("item-select-row").style.display = mode === "edit" ? "flex" : "none";
+  $("item-form").style.display = "block";
+  $("item-form-title").textContent = mode === "edit" ? "Изменить параметры предмета" : "Новый предмет";
+  $("it-code").disabled = mode === "edit";
+  if (mode === "edit") fillItemForm(); else clearItemForm();
+}
+function clearItemForm() {
+  ["it-code", "it-name", "it-desc", "it-params"].forEach(id => { $(id).value = ""; });
+  $("it-category").selectedIndex = 0;
+  $("it-rarity").selectedIndex = 0;
+  $("it-stack").value = 1;
+  $("it-unique").checked = false;
+  $("it-sellable").checked = true;
+  $("it-tradable").checked = true;
+  $("it-losable").checked = false;
+  $("it-drop-weight").value = 0;
+  $("it-qty-min").value = 1;
+  $("it-qty-max").value = 1;
+}
+function fillItemForm() {
+  const it = ITEMS.find(x => x.code === $("item-select").value);
+  if (!it) return;
+  $("it-code").value = it.code;
+  $("it-name").value = it.name;
+  $("it-desc").value = it.description;
+  $("it-category").value = it.category;
+  $("it-rarity").value = it.rarity;
+  $("it-stack").value = it.stack_limit;
+  $("it-unique").checked = it.is_unique;
+  $("it-sellable").checked = it.sellable;
+  $("it-tradable").checked = it.tradable;
+  $("it-losable").checked = it.losable_on_defeat;
+  $("it-drop-weight").value = it.drop_weight;
+  $("it-qty-min").value = it.drop_qty_min;
+  $("it-qty-max").value = it.drop_qty_max;
+  $("it-params").value = Object.keys(it.params || {}).length ? JSON.stringify(it.params) : "";
+}
+function collectItemForm() {
+  let params = {};
+  const raw = $("it-params").value.trim();
+  if (raw) {
+    try { params = JSON.parse(raw); } catch (e) { throw new Error("параметры: некорректный JSON"); }
+  }
+  return {
+    code: $("it-code").value.trim(),
+    name: $("it-name").value.trim(),
+    description: $("it-desc").value.trim(),
+    category: $("it-category").value,
+    rarity: $("it-rarity").value,
+    stack_limit: Number($("it-stack").value || 1),
+    is_unique: $("it-unique").checked,
+    sellable: $("it-sellable").checked,
+    tradable: $("it-tradable").checked,
+    losable_on_defeat: $("it-losable").checked,
+    drop_weight: Number($("it-drop-weight").value || 0),
+    drop_qty_min: Number($("it-qty-min").value || 1),
+    drop_qty_max: Number($("it-qty-max").value || 1),
+    params,
+  };
+}
+async function saveItem() {
+  let body;
+  try { body = collectItemForm(); } catch (e) { out("Ошибка: " + e.message, false); return; }
+  try {
+    if (ITEM_MODE === "create") await api("POST", "/admin/items", body, true);
+    else await api("PUT", "/admin/items/" + encodeURIComponent(body.code), body, true);
+    out("Успешное сохранение предмета", true);
+    await loadItems();
+    if (ITEM_MODE === "edit") $("item-select").value = body.code;
+  } catch (e) { out("Ошибка: " + e.message, false); }
+}
+function cancelItem() {
+  $("item-form").style.display = "none";
+  $("item-select-row").style.display = "none";
+  ITEM_MODE = null;
+  out("Изменения отменены", true);
 }
 async function loadAnalytics() {
   const d = await api("GET", "/admin/analytics");

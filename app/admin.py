@@ -27,6 +27,7 @@ from app.models_game import (
     EffectTemplate,
     EventTemplate,
     Expedition,
+    ItemTemplate,
     QuestTemplate,
     RecipeTemplate,
     WalletLedger,
@@ -271,6 +272,146 @@ async def set_content_status(
     )
     await session.flush()
     return {"code": code, "status": status}
+
+
+# --- предметы (админ): справочник + редактор -----------------------------------------
+
+ITEM_RARITIES = ("common", "rare", "epic", "unique")
+DEFAULT_ITEM_CATEGORIES = ("resource", "consumable", "module", "repair_kit", "special")
+
+
+def _item_to_dict(item: ItemTemplate) -> dict[str, Any]:
+    return {
+        "code": item.code,
+        "name": item.name,
+        "description": item.description,
+        "category": item.category,
+        "rarity": item.rarity,
+        "stack_limit": item.stack_limit,
+        "is_unique": item.is_unique,
+        "sellable": item.sellable,
+        "tradable": item.tradable,
+        "losable_on_defeat": item.losable_on_defeat,
+        "drop_weight": item.drop_weight,
+        "drop_qty_min": item.drop_qty_min,
+        "drop_qty_max": item.drop_qty_max,
+        "params": item.params or {},
+    }
+
+
+async def list_items(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
+    """Все предметы + список типов (для выпадающих списков редактора)."""
+    require_role(admin, "admin")
+    items = (
+        await session.scalars(sa.select(ItemTemplate).order_by(ItemTemplate.code))
+    ).all()
+    categories = sorted(
+        set(DEFAULT_ITEM_CATEGORIES) | {i.category for i in items if i.category}
+    )
+    return {
+        "items": [_item_to_dict(i) for i in items],
+        "categories": categories,
+        "rarities": list(ITEM_RARITIES),
+    }
+
+
+def _validate_item(data: dict[str, Any], *, create: bool) -> dict[str, Any]:
+    """Проверка полей предмета; возвращает нормализованные значения."""
+    import re
+
+    errors: list[str] = []
+    code = str(data.get("code", "")).strip().lower()
+    if create and not re.fullmatch(r"[a-z0-9_]{2,64}", code):
+        errors.append("код: 2–64 символа a-z, 0-9, _")
+    name = str(data.get("name", "")).strip()
+    if not name:
+        errors.append("название обязательно")
+    category = str(data.get("category", "")).strip()
+    if not category:
+        errors.append("тип предмета обязателен")
+    rarity = str(data.get("rarity", "common")).strip()
+    if rarity not in ITEM_RARITIES:
+        errors.append(f"редкость: {'|'.join(ITEM_RARITIES)}")
+
+    def _int(field: str, default: int, lo: int, hi: int) -> int:
+        raw = data.get(field, default)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            errors.append(f"{field}: целое число")
+            return default
+        if not lo <= value <= hi:
+            errors.append(f"{field}: от {lo} до {hi}")
+        return value
+
+    stack_limit = _int("stack_limit", 1, 1, 1_000_000)
+    drop_weight = _int("drop_weight", 0, 0, 100)
+    drop_qty_min = _int("drop_qty_min", 1, 1, 1_000_000)
+    drop_qty_max = _int("drop_qty_max", 1, 1, 1_000_000)
+    if drop_qty_max < drop_qty_min:
+        errors.append("количество «до» меньше «от»")
+    params = data.get("params") or {}
+    if not isinstance(params, dict):
+        errors.append("параметры: JSON-объект")
+        params = {}
+    if errors:
+        raise DomainError("bad_item", "Ошибка: " + "; ".join(errors))
+    return {
+        "code": code,
+        "name": name,
+        "description": str(data.get("description", "")).strip(),
+        "category": category,
+        "rarity": rarity,
+        "stack_limit": stack_limit,
+        "is_unique": bool(data.get("is_unique", False)),
+        "sellable": bool(data.get("sellable", True)),
+        "tradable": bool(data.get("tradable", True)),
+        "losable_on_defeat": bool(data.get("losable_on_defeat", False)),
+        "drop_weight": drop_weight,
+        "drop_qty_min": drop_qty_min,
+        "drop_qty_max": drop_qty_max,
+        "params": params,
+    }
+
+
+async def create_item(
+    session: AsyncSession, admin: AdminUser, data: dict[str, Any]
+) -> dict[str, Any]:
+    require_role(admin, "admin")
+    fields = _validate_item(data, create=True)
+    existing = await session.scalar(
+        sa.select(ItemTemplate).where(ItemTemplate.code == fields["code"])
+    )
+    if existing is not None:
+        raise DomainError("bad_item", f"Ошибка: предмет «{fields['code']}» уже существует.")
+    item = ItemTemplate(**fields)
+    session.add(item)
+    await audit(
+        session, admin, "create_item", target_type="item_templates",
+        target_id=fields["code"], after=fields,
+    )
+    await session.flush()
+    return _item_to_dict(item)
+
+
+async def update_item(
+    session: AsyncSession, admin: AdminUser, code: str, data: dict[str, Any]
+) -> dict[str, Any]:
+    require_role(admin, "admin")
+    item = await session.scalar(sa.select(ItemTemplate).where(ItemTemplate.code == code))
+    if item is None:
+        raise DomainError("bad_item", f"Ошибка: предмет «{code}» не найден.")
+    fields = _validate_item({**data, "code": code}, create=False)
+    before = _item_to_dict(item)
+    for key, value in fields.items():
+        if key != "code":  # код — первичный идентификатор, не меняем
+            setattr(item, key, value)
+    await audit(
+        session, admin, "update_item", target_type="item_templates",
+        target_id=code, before=before, after=_item_to_dict(item),
+    )
+    await session.flush()
+    return _item_to_dict(item)
 
 
 # --- аналитика (MVP) -------------------------------------------------------------------

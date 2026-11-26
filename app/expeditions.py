@@ -326,6 +326,8 @@ async def _apply_outcome(
             await _apply_defeat(session, character, expedition, rng)
             effects.append(t("effect_ship_down", character.lang))
 
+    effects.extend(await _roll_expedition_drop(session, character, rng))
+
     event.status = "resolved"
     event.resolution = {"outcome": outcome, "effects": effects}
     event.resolved_at = datetime.now(UTC)
@@ -334,6 +336,36 @@ async def _apply_outcome(
     await track(session, character, "event_resolved", {"code": event.snapshot.get("code")})
     await session.flush()
     return effects
+
+
+async def _roll_expedition_drop(
+    session: AsyncSession, character: Character, rng: random.Random
+) -> list[str]:
+    """Бонусный дроп предметов с drop_weight > 0 (настраивается в админ-панели).
+
+    Каждый предмет бросает независимый шанс drop_weight %; количество — из
+    диапазона [drop_qty_min, drop_qty_max]. Полный инвентарь — прямой дроп с
+    потерей остатка (правило ТЗ). Боевые события сюда не попадают: у врагов
+    свои таблицы добычи.
+    """
+    templates = (
+        await session.scalars(
+            sa.select(ItemTemplate).where(ItemTemplate.drop_weight > 0).order_by(ItemTemplate.code)
+        )
+    ).all()
+    lines: list[str] = []
+    for template in templates:
+        if rng.random() * 100 >= template.drop_weight:
+            continue
+        qty = rng.randint(template.drop_qty_min, max(template.drop_qty_min, template.drop_qty_max))
+        given = await characters.grant_items(
+            session, character, code=template.code, qty=qty, allow_loss=True
+        )
+        if given > 0:
+            lines.append(t("effect_got", character.lang, qty=given, code=template.code))
+        if given < qty:
+            lines.append(t("effect_lost_full", character.lang, qty=qty - given, code=template.code))
+    return lines
 
 
 async def _apply_defeat(

@@ -75,6 +75,13 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
 - **Конфиг баланса** — всё в `config_params` (правится из админ-панели, hot reload).
   Админка: http://localhost:8000/admin-panel (веб-UI), ключ X-Admin-Key, роли
   admin/moderator/content_manager, аудит в `audit_log`.
+- **Редактор предметов** (вкладка «Предметы», роль admin): создание/изменение
+  item_templates — название, тип (category), редкость, уникальность, флаги
+  sellable/tradable/losable_on_defeat, лимит стека, params JSON и БОНУСНЫЙ ДРОП:
+  `drop_weight` (% шанс после события экспедиции, 0 = не падает) + диапазон
+  `drop_qty_min/max`. Дроп бросается в `expeditions._roll_expedition_drop` после
+  каждого НЕбоевого исхода события (у врагов — свои loot_tables). API:
+  GET/POST /admin/items, PUT /admin/items/{code}.
 
 ## Ключевые правила ТЗ (не сломать!)
 
