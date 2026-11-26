@@ -87,6 +87,14 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
   очереди timers/outbox — `admin.server_load`, GET /admin/server-load);
   игровой мир человекочитаемо (`admin.analytics`); журнал аудита — время МСК,
   ключ, краткая суть (`admin.audit_log_view`, GET /admin/audit-log).
+- **Инструменты** (вкладка «Инструменты», `app/health.py`): проверка VK (вызов
+  users.get с токеном), TG (getMe при заданном TG_BOT_TOKEN, иначе доступность
+  api.telegram.org), сервер (БД + живость бота/worker по advisory-локам в
+  pg_locks, скоуп по текущей БД!). Ручной запуск: POST /admin/health/check
+  {target: vk|tg|server|all}. Расписание: PUT /admin/health/schedule
+  {interval_sec} (0 = выкл, минимум 30с), выполняет worker (`_health_tick`).
+  Результаты и расписание — в config_params (`tools.health_last`,
+  `tools.health_interval_sec`), UI показывает время последней проверки МСК.
 
 ## Ключевые правила ТЗ (не сломать!)
 

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     vk_group_id: int | None = None
     vk_api_version: str = "5.199"
 
+    # Telegram (адаптер в планах; токен используется проверкой работоспособности)
+    tg_bot_token: str | None = None
+
     # платежи: базовый URL для webhook/pay_url мок-провайдера (в проде — публичный адрес)
     payments_base_url: str = "http://localhost:8000"
 

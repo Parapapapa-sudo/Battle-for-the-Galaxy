@@ -147,6 +147,25 @@ section.active { display: block; }
     </div>
   </div></section>
 
+  <section data-tab="tools">
+  <div class="card"><h2>Проверка работоспособности</h2>
+    <div class="formrow">
+      <button class="ghost" onclick="healthCheck('vk')">Проверить ВК</button>
+      <button class="ghost" onclick="healthCheck('tg')">Проверить TG</button>
+      <button class="ghost" onclick="healthCheck('server')">Проверить сервер</button>
+      <button onclick="healthCheck('all')">Проверить всё</button>
+    </div>
+    <div id="health-status" class="result">Загрузка…</div>
+  </div>
+  <div class="card"><h2>Расписание проверок</h2>
+    <div class="formrow">
+      <input id="health-interval" type="number" min="0" placeholder="Интервал, секунд (0 — выкл)" title="Интервал автоматической проверки, секунд">
+      <button onclick="healthSchedule()">Задать расписание</button>
+      <button class="ghost" onclick="loadHealth()">Обновить статус</button>
+    </div>
+    <div class="note">Плановые проверки выполняет worker. Результат последней проверки (дата и время МСК + статусы) — в блоке выше.</div>
+  </div></section>
+
   <section data-tab="analytics">
   <div class="card"><h2>Нагрузка на сервер</h2>
     <button class="ghost" onclick="toggleSection('srvload', loadServerLoad, this)">Показать</button>
@@ -171,6 +190,7 @@ const TABS = [
   ["content", "Контент", ["admin", "content_manager"]],
   ["items", "Предметы", ["admin"]],
   ["analytics", "Аналитика", ["admin"]],
+  ["tools", "Инструменты", ["admin"]],
 ];
 let ROLE = null, CHOSEN = null;
 const $ = (id) => document.getElementById(id);
@@ -222,7 +242,7 @@ async function saveKey() {
     renderTabs();
     out("Ключ принят: " + me.login + " (" + me.role + ")", true);
     loadEffects();
-    if (me.role === "admin") loadItems();
+    if (me.role === "admin") { loadItems(); loadHealth(); }
   } catch (e) { ROLE = null; $("role").textContent = "ключ не принят"; renderTabs(); }
 }
 async function loadEffects() {
@@ -408,6 +428,46 @@ async function loadAuditLog() {
   $("auditlog").textContent = (d.entries || [])
     .map(e => e.time_msk + " · " + e.actor + " · " + e.summary)
     .join("\n") || "Журнал пуст.";
+}
+// --- инструменты: проверка работоспособности ------------------------------------
+const HEALTH_LABELS = { vk: "ВК", tg: "Telegram", server: "Сервер" };
+function renderHealth(d) {
+  const lines = [];
+  lines.push("Расписание: " + (d.interval_sec > 0 ? "каждые " + d.interval_sec + " с" : "выключено"));
+  if (d.last) {
+    lines.push("Последняя проверка (МСК): " + d.last.checked_at_msk);
+    (d.targets || ["vk", "tg", "server"]).forEach(t => {
+      const r = (d.last.results || {})[t];
+      if (!r) { lines.push(HEALTH_LABELS[t] + ": нет данных"); return; }
+      lines.push(
+        HEALTH_LABELS[t] + ": " + (r.ok ? "✓ работает" : "✗ НЕ работает") +
+        (r.latency_ms !== null && r.latency_ms !== undefined ? " (" + r.latency_ms + " мс)" : "") +
+        (r.detail ? " — " + r.detail : "")
+      );
+    });
+  } else {
+    lines.push("Проверок ещё не было.");
+  }
+  $("health-status").textContent = lines.join("\n");
+  $("health-interval").value = d.interval_sec || 0;
+}
+async function loadHealth() {
+  try { renderHealth(await api("GET", "/admin/health")); } catch (e) {}
+}
+async function healthCheck(target) {
+  $("health-status").textContent = "Проверка…";
+  try {
+    renderHealth(await api("POST", "/admin/health/check", { target }, true));
+  } catch (e) {
+    out("Ошибка: " + e.message, false);
+    loadHealth();
+  }
+}
+async function healthSchedule() {
+  try {
+    renderHealth(await api("PUT", "/admin/health/schedule", { interval_sec: Number($("health-interval").value || 0) }, true));
+    out("Расписание сохранено", true);
+  } catch (e) { out("Ошибка: " + e.message, false); }
 }
 $("key").value = localStorage.getItem("admin-key") || "";
 if ($("key").value) saveKey(); else renderTabs();

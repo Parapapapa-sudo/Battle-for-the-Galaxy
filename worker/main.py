@@ -35,6 +35,16 @@ async def _sync_payments(sessions: async_sessionmaker[AsyncSession], settings: S
             log.info("payments_synced", count=synced)
 
 
+async def _health_tick(sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
+    """Плановая проверка работоспособности (расписание из админ-панели)."""
+    from app.db import transactional
+    from app.health import scheduled_tick
+
+    async with sessions() as session, transactional(session):
+        if await scheduled_tick(session, settings):
+            log.info("health_check_done")
+
+
 async def run_worker(
     settings: Settings,
     sessions: async_sessionmaker[AsyncSession],
@@ -67,6 +77,7 @@ async def run_worker(
                     await bus.run_due_timers(timer_handlers=handlers)
                     await _settle_eon_market(sessions)
                     await _sync_payments(sessions, settings)
+                    await _health_tick(sessions, settings)
                     await dispatcher.run_once()
                 except Exception:  # noqa: BLE001 — циклы не должны умирать
                     log.exception("worker_cycle_error")

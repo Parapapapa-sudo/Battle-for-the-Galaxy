@@ -188,6 +188,48 @@ async def audit_log(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
             _guard(exc)
 
 
+@router.get("/health")
+async def health_status(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    from app import health
+
+    async with session_factory() as session, transactional(session):
+        try:
+            return await health.get_status(session, adm)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.post("/health/check")
+async def health_check(
+    body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    from app import health
+    from app.config import get_settings
+
+    async with session_factory() as session, transactional(session):
+        try:
+            return await health.run_checks(
+                session, adm, get_settings(), target=str(body.get("target", "all"))
+            )
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.put("/health/schedule")
+async def health_schedule(
+    body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    from app import health
+
+    async with session_factory() as session, transactional(session):
+        try:
+            return await health.set_interval(session, adm, int(body.get("interval_sec", 0)))
+        except (DomainError, TypeError, ValueError) as exc:
+            if isinstance(exc, DomainError):
+                _guard(exc)
+            raise HTTPException(status_code=400, detail="interval_sec: целое число") from exc
+
+
 @router.post("/admins")
 async def create_admin(
     body: dict[str, Any], adm: AdminUser = Depends(current_admin)
