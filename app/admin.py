@@ -28,6 +28,7 @@ from app.models_game import (
     EffectTemplate,
     EventTemplate,
     Expedition,
+    Faction,
     ItemTemplate,
     QuestTemplate,
     RecipeTemplate,
@@ -674,6 +675,205 @@ async def delete_content(
     return {"code": code, "mode": mode}
 
 
+# --- структурированные секции конфигурации (вкладки «Конфигурации») ---------------------
+
+# (key, label, type[int|str|json], min, max)
+CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int | None]]]] = {
+    "character": ("Базовые параметры персонажа", [
+        ("inventory.base_size", "Размер инвентаря (слотов)", "int", 1, 1000),
+        ("warehouse.base_size", "Размер склада (слотов)", "int", 1, 1000),
+        ("reputation.start_value", "Стартовая репутация", "int", -1000, 1000),
+        ("names.min_length", "Минимальная длина имени", "int", 1, 64),
+        ("names.max_length", "Максимальная длина имени", "int", 1, 64),
+        ("subscription.inventory_bonus_pct", "Бонус инвентаря по подписке, %", "int", 0, 500),
+        ("subscription.craft_slots_bonus", "Доп. слот крафта по подписке", "int", 0, 10),
+        ("ship.patch_duration_sec", "Длительность ремонта («Залатать»), сек", "int", 1, 86400),
+        ("progression.reset_item", "Предмет за сброс сборки (код)", "str", None, None),
+        ("progression.reset_base_qty", "Кол-во предметов за сброс (база)", "int", 0, 100000),
+        ("progression.reset_formula", "Формула роста стоимости сброса", "str", None, None),
+        ("module.level_thresholds", "Пороги уровней модулей (JSON-список)", "json", None, None),
+    ]),
+    "expedition": ("Экспедиции и возвращение", [
+        ("expedition.event_cooldown_base_sec", "Пауза между событиями (база), сек", "int", 0, 3600),
+        ("expedition.event_cooldown_per_2fuel_sec", "…+ сек за каждые 2 ед. потраченного топлива", "int", 0, 100),
+        ("expedition.queue_length", "Длина очереди событий", "int", 1, 100),
+        ("expedition.return_delay_sec", "Задержка возвращения в космопорт, сек", "int", 0, 86400),
+        ("fuel_empty.malfunctions", "Поломки при пустом баке", "int", 0, 100),
+        ("defeat.malfunctions", "Поломки при поражении", "int", 0, 100),
+        ("defeat.loss_min_pct", "Потеря добычи при поражении: от, %", "int", 0, 100),
+        ("defeat.loss_max_pct", "Потеря добычи при поражении: до, %", "int", 0, 100),
+        ("danger.low_max", "Опасность «низкая»: до", "int", 1, 10),
+        ("danger.high_min", "Опасность «высокая»: от", "int", 1, 10),
+    ]),
+    "combat": ("Бой", [
+        ("combat.retreat_chance_pct", "Шанс отступления, %", "int", 0, 100),
+        ("combat.retreat_damage_chance_pct", "Шанс урона при отступлении, %", "int", 0, 100),
+        ("combat.retreat_damage_amount", "Урон при неудачном отступлении", "int", 0, 1000),
+        ("combat.retreat_malfunction_chance_pct", "Шанс поломки при отступлении, %", "int", 0, 100),
+        ("combat.damage_spread_pct", "Разброс урона, %", "int", 0, 100),
+        ("combat.consumables_per_turn", "Расходников за ход", "int", 0, 10),
+        ("combat.chance_low_max", "Шанс «низкий»: до, %", "int", 0, 100),
+        ("combat.chance_high_min", "Шанс «высокий»: от, %", "int", 0, 100),
+        ("combat.allowed_consumables", "Разрешённые расходники (JSON-список)", "json", None, None),
+    ]),
+    "economy": ("Экономика и рынок", [
+        ("eon.rub_rate", "Курс: 1 Эон = N руб.", "int", 1, 1000),
+        ("market.reference_price_quant", "Референс-цена Эона, квантов", "int", 1, 1000000),
+        ("market.max_deviation_pct", "Макс. отклонение цены ордера, %", "int", 0, 100),
+        ("market.order_min_eon", "Минимальный ордер, Эонов", "int", 1, 1000000),
+        ("market.order_max_eon", "Максимальный ордер, Эонов", "int", 1, 1000000),
+        ("auction.commission_pct", "Комиссия аукциона, %", "int", 0, 100),
+        ("auction.duration_sec", "Длительность лота, сек", "int", 60, 604800),
+        ("auction.max_lots", "Макс. лотов у игрока", "int", 1, 100),
+        ("auction.max_lots_subscriber", "Макс. лотов (подписка)", "int", 1, 100),
+        ("auction.cancel_return_sec", "Возврат снятого лота через, сек", "int", 0, 86400),
+        ("transfer.commission_pct", "Комиссия перевода, %", "int", 0, 100),
+        ("transfer.max_quant", "Макс. перевод, квантов", "int", 1, 100000000),
+        ("transfer.confirm_threshold_quant", "Порог подтверждения перевода, квантов", "int", 0, 100000000),
+        ("transfer.offer_ttl_sec", "Срок жизни заявки на перевод, сек", "int", 60, 604800),
+    ]),
+}
+
+FACTION_BONUS_LABELS = {
+    "trade_fee_discount_pct": "скидка на комиссию торговли, %",
+    "hull_bonus_pct": "бонус прочности корпуса, %",
+    "loot_bonus_pct": "бонус добычи, %",
+    "xp_bonus_pct": "бонус опыта, %",
+}
+
+# пары «от/до»: (меньшее, большее, строгое_неравенство)
+_SECTION_PAIRS: dict[str, list[tuple[str, str, bool]]] = {
+    "character": [("names.min_length", "names.max_length", False)],
+    "expedition": [
+        ("defeat.loss_min_pct", "defeat.loss_max_pct", False),
+        ("danger.low_max", "danger.high_min", True),
+    ],
+    "combat": [("combat.chance_low_max", "combat.chance_high_min", True)],
+    "economy": [("market.order_min_eon", "market.order_max_eon", False)],
+}
+
+
+def _coerce_config_value(
+    key: str, label: str, ftype: str, lo: int | None, hi: int | None, raw: Any
+) -> Any:
+    import json as _json
+
+    if ftype == "int":
+        try:
+            value = int(str(raw).strip())
+        except (TypeError, ValueError):
+            raise DomainError("bad_config", f"«{label}»: целое число") from None
+        if (lo is not None and value < lo) or (hi is not None and value > hi):
+            raise DomainError("bad_config", f"«{label}»: от {lo} до {hi}")
+        return value
+    if ftype == "json":
+        if isinstance(raw, str):
+            try:
+                return _json.loads(raw)
+            except ValueError:
+                raise DomainError("bad_config", f"«{label}»: некорректный JSON") from None
+        return raw
+    text = str(raw).strip()
+    if not text:
+        raise DomainError("bad_config", f"«{label}»: не заполнено")
+    return text
+
+
+async def _faction_section_fields(session: AsyncSession) -> list[dict[str, Any]]:
+    factions = (await session.scalars(sa.select(Faction).order_by(Faction.code))).all()
+    fields: list[dict[str, Any]] = []
+    for faction in factions:
+        for key in sorted(faction.bonuses or {}):
+            fields.append(
+                {
+                    "key": f"{faction.code}.{key}",
+                    "label": f"{faction.name}: {FACTION_BONUS_LABELS.get(key, key)}",
+                    "type": "int",
+                    "min": -100,
+                    "max": 1000,
+                    "value": faction.bonuses[key],
+                }
+            )
+    return fields
+
+
+async def get_config_sections(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
+    """Секции конфигурации с текущими значениями (вкладки «Конфигурации»)."""
+    require_role(admin, "admin")
+    sections: list[dict[str, Any]] = []
+    for sid, (title, specs) in CONFIG_SECTIONS.items():
+        fields = []
+        for key, label, ftype, lo, hi in specs:
+            fields.append(
+                {
+                    "key": key, "label": label, "type": ftype, "min": lo, "max": hi,
+                    "value": await stores.get_param(session, key),
+                }
+            )
+        sections.append({"id": sid, "title": title, "fields": fields})
+    sections.append(
+        {"id": "factions", "title": "Прибавки фракций", "fields": await _faction_section_fields(session)}
+    )
+    return {"sections": sections}
+
+
+async def save_config_section(
+    session: AsyncSession, admin: AdminUser, section_id: str, values: dict[str, Any]
+) -> dict[str, Any]:
+    """Сохранение вкладки целиком: валидация всех полей, затем запись (hot reload)."""
+    require_role(admin, "admin")
+    if section_id == "factions":
+        return await _save_faction_section(session, admin, values)
+    spec = CONFIG_SECTIONS.get(section_id)
+    if spec is None:
+        raise DomainError("bad_section", "Неизвестная вкладка конфигурации.")
+    _, fields = spec
+    coerced: dict[str, Any] = {}
+    for key, label, ftype, lo, hi in fields:
+        if key not in values:
+            raise DomainError("bad_config", f"«{label}»: не заполнено")
+        coerced[key] = _coerce_config_value(key, label, ftype, lo, hi, values[key])
+    for a, b, strict in _SECTION_PAIRS.get(section_id, []):
+        if strict and not coerced[a] < coerced[b]:
+            raise DomainError("bad_config", f"«{a}» должно быть строго меньше «{b}»")
+        if not strict and coerced[a] > coerced[b]:
+            raise DomainError("bad_config", f"«{a}» должно быть не больше «{b}»")
+    for key, value in coerced.items():
+        await set_config(session, admin, key, value)
+    await session.flush()
+    return await get_config_sections(session, admin)
+
+
+async def _save_faction_section(
+    session: AsyncSession, admin: AdminUser, values: dict[str, Any]
+) -> dict[str, Any]:
+    factions = {
+        f.code: f for f in (await session.scalars(sa.select(Faction))).all()
+    }
+    changes: dict[str, Any] = {}
+    for compound, raw in values.items():
+        code, _, bonus_key = compound.partition(".")
+        faction = factions.get(code)
+        if faction is None or not bonus_key or bonus_key not in (faction.bonuses or {}):
+            raise DomainError("bad_config", f"Неизвестная прибавка: {compound}")
+        try:
+            value = int(str(raw).strip())
+        except (TypeError, ValueError):
+            raise DomainError("bad_config", f"«{compound}»: целое число") from None
+        if not -100 <= value <= 1000:
+            raise DomainError("bad_config", f"«{compound}»: от -100 до 1000")
+        if faction.bonuses[bonus_key] != value:
+            changes[compound] = {"before": faction.bonuses[bonus_key], "after": value}
+        faction.bonuses = {**faction.bonuses, bonus_key: value}
+    if changes:
+        await audit(
+            session, admin, "set_config_section", target_type="factions",
+            target_id="factions", after=changes,
+        )
+    await session.flush()
+    return await get_config_sections(session, admin)
+
+
 # --- аналитика (MVP) -------------------------------------------------------------------
 
 # МСК без перехода на летнее время (UTC+3) — для журнала аудита в админ-панели
@@ -694,6 +894,7 @@ _AUDIT_ACTION_LABELS = {
     "delete_content": "удалил контент",
     "health_check": "проверил работоспособность",
     "set_health_schedule": "настроил расписание проверок",
+    "set_config_section": "изменил прибавки фракций",
 }
 
 

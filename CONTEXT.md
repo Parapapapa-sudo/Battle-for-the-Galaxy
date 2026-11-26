@@ -104,6 +104,13 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
   (ExpeditionEvent RESTRICT / CharacterQuest) — status='archived' (из игры
   исчезает, история цела). JSON-поля (script/objectives/rewards/materials)
   редактируются как JSON-текст в форме.
+- **Секции конфигурации** (вкладка «Конфигурация», реестр `admin.CONFIG_SECTIONS`):
+  character / expedition / combat / economy + factions (прибавки из
+  factions.bonuses, ключи «<faction>.<bonus>», подписи FACTION_BONUS_LABELS).
+  GET /admin/config-sections, PUT /admin/config-sections/{id} — сохранение
+  вкладки целиком с валидацией (типы/диапазоны/пары «от-до» _SECTION_PAIRS);
+  запись через set_config (hot reload, аудит каждого ключа). Новый параметр
+  в UI = строка в CONFIG_SECTIONS.
 
 ## Ключевые правила ТЗ (не сломать!)
 

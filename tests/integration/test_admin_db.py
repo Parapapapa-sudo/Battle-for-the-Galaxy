@@ -222,6 +222,58 @@ async def test_moderator_cannot_create_effects(session, seeded):
 
 
 @requires_db
+async def test_config_sections_save_and_validate(session, seeded):
+    """Вкладки конфигурации: чтение, сохранение, парные валидации, фракции."""
+    owner, mod, _ = await _admins(session)
+
+    data = await admin.get_config_sections(session, owner)
+    ids = [s["id"] for s in data["sections"]]
+    assert ids == ["character", "expedition", "combat", "economy", "factions"]
+    with pytest.raises(DomainError) as exc_info:
+        await admin.get_config_sections(session, mod)
+    assert exc_info.value.code == "forbidden"
+
+    character = next(s for s in data["sections"] if s["id"] == "character")
+    values = {f["key"]: f["value"] for f in character["fields"]}
+    assert values["inventory.base_size"] == 30
+
+    # сохранение с изменением
+    values["inventory.base_size"] = 35
+    result = await admin.save_config_section(session, owner, "character", values)
+    from app import stores
+
+    assert await stores.get_param(session, "inventory.base_size") == 35
+
+    # парная валидация: min > max
+    values["names.min_length"] = 30
+    values["names.max_length"] = 10
+    with pytest.raises(DomainError) as exc_info:
+        await admin.save_config_section(session, owner, "character", values)
+    assert exc_info.value.code == "bad_config"
+
+    # нечисловое значение
+    values["names.min_length"] = "abc"
+    with pytest.raises(DomainError):
+        await admin.save_config_section(session, owner, "character", values)
+
+    # фракции: меняем бонус азимута
+    factions = next(s for s in data["sections"] if s["id"] == "factions")
+    fvalues = {f["key"]: f["value"] for f in factions["fields"]}
+    assert "azimuth.trade_fee_discount_pct" in fvalues
+    fvalues["azimuth.trade_fee_discount_pct"] = 10
+    result = await admin.save_config_section(session, owner, "factions", fvalues)
+    factions2 = next(s for s in result["sections"] if s["id"] == "factions")
+    updated = {f["key"]: f["value"] for f in factions2["fields"]}
+    assert updated["azimuth.trade_fee_discount_pct"] == 10
+
+    # неизвестная прибавка — ошибка
+    with pytest.raises(DomainError):
+        await admin.save_config_section(
+            session, owner, "factions", {"azimuth.no_such_bonus": 5}
+        )
+
+
+@requires_db
 async def test_content_editor_crud(session, seeded):
     """Редактор контента: создание/правка/удаление событий, заданий, рецептов."""
     owner, mod, cm = await _admins(session)

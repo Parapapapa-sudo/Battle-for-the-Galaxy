@@ -64,7 +64,8 @@ section.active { display: block; }
     <div class="formrow"><textarea id="cfg-value" rows="2" placeholder='значение (JSON), напр. 45 или "text"'></textarea></div>
     <button onclick="cfgSet()">Сохранить</button>
     <div class="note">Примеры ключей: inventory.base_size, combat.retreat_chance_pct, market.reference_price_quant, auction.commission_pct, module.level_thresholds</div>
-  </div></section>
+  </div>
+  <div id="config-sections"></div></section>
 
   <section data-tab="moderation"><div class="card"><h2>Модерация игроков</h2>
     <div class="formrow"><input id="find-name" placeholder="имя персонажа"><button class="ghost" onclick="findChar()">Найти</button></div>
@@ -273,7 +274,7 @@ async function saveKey() {
     renderTabs();
     out("Ключ принят: " + me.login + " (" + me.role + ")", true);
     loadEffects();
-    if (me.role === "admin") { loadItems(); loadHealth(); }
+    if (me.role === "admin") { loadItems(); loadHealth(); loadConfigSections(); }
     if (me.role === "admin" || me.role === "content_manager") loadContentList();
   } catch (e) { ROLE = null; $("role").textContent = "ключ не принят"; renderTabs(); }
 }
@@ -284,6 +285,54 @@ async function loadEffects() {
   } catch (e) {}
 }
 async function cfgGet() { out(await api("GET", "/admin/config/" + $("cfg-key").value.trim()), true); }
+// --- структурированные вкладки конфигурации ---------------------------------------
+let CONFIG_SECTIONS = [];
+function csId(sid, key) { return "cs-" + sid + "-" + key.replace(/\./g, "_"); }
+async function loadConfigSections() {
+  try {
+    const d = await api("GET", "/admin/config-sections");
+    CONFIG_SECTIONS = d.sections;
+    renderConfigSections();
+  } catch (e) {}
+}
+function renderConfigSections() {
+  const root = $("config-sections");
+  root.innerHTML = "";
+  CONFIG_SECTIONS.forEach(s => {
+    const card = document.createElement("div");
+    card.className = "card";
+    let html = "<h2>" + s.title + "</h2>";
+    s.fields.forEach(f => {
+      const id = csId(s.id, f.key);
+      if (f.type === "json") {
+        html += '<div class="note">' + f.label + '</div><div class="formrow"><textarea id="' + id + '" rows="2" class="mono">' + (f.value === null ? "" : JSON.stringify(f.value)) + "</textarea></div>";
+      } else {
+        html += '<div class="formrow"><input id="' + id + '" type="' + (f.type === "str" ? "text" : "number") + '" value="' + (f.value === null ? "" : f.value) + '" placeholder="' + f.label + '" title="' + f.label + '"></div>';
+      }
+    });
+    html += '<div class="formrow"><button class="ghost" onclick="configSectionCancel()">Отменить изменения</button>' +
+      '<button onclick="configSectionSave(\'' + s.id + '\')">Сохранить изменения</button></div>';
+    card.innerHTML = html;
+    root.appendChild(card);
+  });
+}
+function configSectionCancel() {
+  renderConfigSections();
+  out("Изменения отменены", true);
+}
+async function configSectionSave(sid) {
+  const s = CONFIG_SECTIONS.find(x => x.id === sid);
+  const values = {};
+  for (const f of s.fields) values[f.key] = $(csId(sid, f.key)).value.trim();
+  try {
+    const d = await api("PUT", "/admin/config-sections/" + sid, { values }, true);
+    CONFIG_SECTIONS = d.sections;
+    renderConfigSections();
+    out("Контент сохранен", true);
+  } catch (e) {
+    out("Ошибка при сохранении. Некорректные значения полей. " + e.message, false);
+  }
+}
 async function cfgSet() {
   let v = $("cfg-value").value.trim();
   try { v = JSON.parse(v); } catch (e) {}

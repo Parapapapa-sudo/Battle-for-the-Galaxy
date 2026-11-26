@@ -48,6 +48,29 @@ async def get_config(key: str, adm: AdminUser = Depends(current_admin)) -> dict[
             _guard(exc)
 
 
+@router.get("/config-sections")
+async def config_sections(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.get_config_sections(session, adm)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.put("/config-sections/{section_id}")
+async def config_section_save(
+    section_id: str, body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            values = body.get("values")
+            if not isinstance(values, dict):
+                raise HTTPException(status_code=400, detail="values: объект")
+            return await admin.save_config_section(session, adm, section_id, values)
+        except DomainError as exc:
+            _guard(exc)
+
+
 @router.put("/config/{key}")
 async def put_config(
     key: str, body: dict[str, Any], adm: AdminUser = Depends(current_admin)
