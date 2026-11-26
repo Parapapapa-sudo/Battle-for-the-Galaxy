@@ -45,7 +45,7 @@ async def test_full_player_journey(session, seeded, sessions):
         bus, sessions, platform="console", platform_user_id=user,
         text="me", idempotency_key=_key(),
     )
-    assert "Капитан Тестер" in r4.message and "Хелионский" in r4.message
+    assert "Капитан Тестер" in r4.message and "Астрийский Конкордат" in r4.message
 
     # inv — стартовый набор
     r5 = await route_text_command(
