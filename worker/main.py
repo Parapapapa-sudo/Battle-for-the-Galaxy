@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app import db
 from app.bus import CommandBus
 from app.config import Settings
-from worker.dispatcher import OutboxDispatcher
+from worker.dispatcher import OutboxDispatcher, Sender
 
 log = structlog.get_logger(__name__)
 
@@ -79,6 +79,27 @@ async def run_worker(
         log.info("worker_stopped")
 
 
+class _PrintSender:
+    async def send(self, *, character_id: str, text: str, platform: str | None) -> None:
+        log.info("outbox_message", to=character_id, platform=platform, text=text)
+
+
+def _sender_from_settings(settings: Settings, sessions: async_sessionmaker[AsyncSession]) -> "Sender":
+    """Транспорт outbox для worker'а.
+
+    VK настроен — worker обязан доставлять по-настоящему (VkSender), как бот:
+    claim в outbox атомарен (SKIP LOCKED), поэтому кто из двух процессов забрал
+    сообщение, тот и отправляет. PrintSender здесь «съедал» бы сообщения,
+    помечая их отправленными, — игроки не получали уведомления (ремонт и т.п.).
+    """
+    if settings.vk_bot_token and settings.vk_group_id:
+        from adapters.vk.api import VkApi, VkSender
+
+        api = VkApi(settings.vk_bot_token, api_version=settings.vk_api_version)
+        return VkSender(sessions, api)
+    return _PrintSender()
+
+
 def main() -> None:
     import asyncio
 
@@ -88,13 +109,11 @@ def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
 
-    class _PrintSender:
-        async def send(self, *, character_id: str, text: str, platform: str | None) -> None:
-            log.info("outbox_message", to=character_id, platform=platform, text=text)
-
     from worker.dispatcher import dispatcher_from_settings
 
-    dispatcher = dispatcher_from_settings(db.session_factory, _PrintSender(), settings)
+    dispatcher = dispatcher_from_settings(
+        db.session_factory, _sender_from_settings(settings, db.session_factory), settings
+    )
     asyncio.run(run_worker(settings, db.session_factory, dispatcher))
 
 

@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import json
 import signal
+import time
 from typing import Any
 
 import structlog
@@ -154,6 +155,11 @@ class _RecentReplies:
 
 _REPLIES = _RecentReplies()
 
+# Сообщения старше этого возраста — бэклог long poll (реконнекты, второй поллер
+# со старым ts, повторные доставки VK), а не живые команды. Иначе «игра играет
+# сама»: старые нажатия кнопок исполняются спустя часы после отправки.
+STALE_UPDATE_SEC = 120
+
 
 async def _send_with_retry(
     api: VkApi, user_id: int, text: str, keyboard: dict[str, Any] | None, *, attempts: int = 4
@@ -188,6 +194,14 @@ async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) ->
         except (ValueError, AttributeError):
             pass
     if not user_id or not text:
+        return
+    msg_date = message.get("date")
+    if msg_date is not None and time.time() - float(msg_date) > STALE_UPDATE_SEC:
+        log.info(
+            "vk_stale_update_skipped",
+            user=user_id,
+            age_sec=int(time.time() - float(msg_date)),
+        )
         return
     key = f"vk:{user_id}:{message.get('conversation_message_id', message.get('id'))}"
     if _REPLIES.seen(key):
