@@ -154,11 +154,10 @@ async def _snapshot_template(template: EventTemplate) -> dict[str, Any]:
 async def proceed(
     session: AsyncSession, character: Character, *, rng: random.Random | None = None
 ) -> tuple[ExpeditionEvent | None, str]:
-    """Команда «дальше»: тратим топливо следующего события и открываем его.
-
-    Автоматическое событие разрешается сразу; интерактивное ждёт выбора.
-    Исчерпание топлива — НЕ ошибка: фиксируется автовозврат (ТЗ), возвращаем текст.
-    """
+    """Команда «Исследовать»: отправление в путь. Событие НЕ появляется сразу —
+    оно прибывает через задержку путешествия (таймер exp_event):
+    10с + (базовое топливо − текущее)/2. Пока идёт путешествие доступна только
+    кнопка «Инфо»."""
     rng = rng or random.Random()
     from app.battles import get_active_battle
 
@@ -168,10 +167,7 @@ async def proceed(
     _raise_if_repairing(expedition)
     _ship = await get_ship(session, character.id)
     if _ship.current_hull <= 1:
-        raise DomainError(
-            "hull_too_low",
-            t("hull_too_low", character.lang),
-        )
+        raise DomainError("hull_too_low", t("hull_too_low", character.lang))
     if expedition is None or expedition.status != "active":
         raise DomainError("no_expedition", "Экспедиция не активна.")
 
@@ -180,40 +176,69 @@ async def proceed(
         snap = offered.snapshot
         raise DomainError(
             "event_pending",
-            f"Сначала завершите событие «{snap.get('name', '?')}» (choice <n>"
+            f"Сначала завершите событие «{snap.get('name', '?')}» (choice <n)"
             + (", decline — отказаться" if snap.get("can_refuse") else "")
             + ").",
         )
 
-    # кулдаун между событиями (ТЗ): база из config + 1с за каждые 2 ед. потраченного топлива
     now = datetime.now(UTC)
     if expedition.next_event_at is not None and expedition.next_event_at > now:
-        wait = int((expedition.next_event_at - now).total_seconds()) + 1
-        raise DomainError(
-            "event_cooldown",
-            f"Сканирование сектора… следующее событие через {wait}с.",
-            details={"wait_sec": wait},
+        return None, await describe_travel(session, character, expedition)
+
+    spent = expedition.fuel_at_start - expedition.fuel_remaining
+    base = int(await stores.get_param(session, "expedition.event_cooldown_base_sec", 10))
+    delay = base + spent // 2  # 10с + (базовое топливо − текущее)/2
+    expedition.next_event_at = now + timedelta(seconds=delay)
+    session.add(
+        Timer(
+            type="exp_event",
+            character_id=character.id,
+            payload={"expedition_id": str(expedition.id)},
+            fires_at=expedition.next_event_at,
         )
+    )
+    await session.flush()
+    return None, await describe_travel(session, character, expedition)
+
+
+async def arrive_event(
+    session: AsyncSession, payload: dict[str, Any], *, rng: random.Random | None = None
+) -> None:
+    """Таймер exp_event: прибытие следующего события путешествия.
+
+    Проверка топлива здесь: при нехватке — автовозврат (ТЗ) с уведомлением.
+    Интерактивное событие ждёт выбора на кнопках; автоматическое разрешается сразу.
+    """
+    rng = rng or random.Random()
+    expedition = await session.get(Expedition, uuid.UUID(str(payload["expedition_id"])))
+    if expedition is None or expedition.status != "active":
+        return
+    if expedition.next_event_at is not None and expedition.next_event_at > datetime.now(UTC):
+        return  # ещё в пути (защита от гонок)
+    character = await session.get(Character, expedition.character_id)
+    assert character is not None
+    lang = character.lang
 
     await _extend_queue_if_needed(session, expedition, rng)
     code = expedition.event_queue[expedition.queue_pos]
-    template = await session.scalar(
-        sa.select(EventTemplate).where(EventTemplate.code == code)
-    )
+    template = await session.scalar(sa.select(EventTemplate).where(EventTemplate.code == code))
     if template is None:
         raise DomainError("content_error", f"Шаблон события не найден: {code}")
 
     if expedition.fuel_remaining < template.fuel_cost:
         await _start_return(session, character, expedition, reason="fuel_empty")
         malfunctions = int(await stores.get_param(session, "fuel_empty.malfunctions", 1))
-        return None, t("ret_fuel_empty_note", character.lang, mal=malfunctions)
+        await stores.add_outbox(
+            session,
+            character_id=character.id,
+            text=t("ret_fuel_empty_note", lang, mal=malfunctions),
+        )
+        await session.flush()
+        return
 
     expedition.fuel_remaining -= template.fuel_cost
     expedition.depth += 1
-    spent = expedition.fuel_at_start - expedition.fuel_remaining
-    base = int(await stores.get_param(session, "expedition.event_cooldown_base_sec", 10))
-    per = int(await stores.get_param(session, "expedition.event_cooldown_per_2fuel_sec", 1))
-    expedition.next_event_at = now + timedelta(seconds=base + (spent // 2) * per)
+    expedition.next_event_at = None
     event = ExpeditionEvent(
         expedition_id=expedition.id,
         event_template_id=template.id,
@@ -227,7 +252,18 @@ async def proceed(
     if template.kind == "automatic":
         variant = pick_variant(template.script.get("variants", []), rng)
         await _apply_outcome(session, character, expedition, event, variant, rng)
-    return event, ""
+        await stores.add_outbox(
+            session,
+            character_id=character.id,
+            text=describe_event(event, lang=lang),
+        )
+    else:
+        await stores.add_outbox(
+            session,
+            character_id=character.id,
+            text=describe_event(event, lang=lang),
+        )
+    await session.flush()
 
 
 # --- разрешение событий --------------------------------------------------------
@@ -457,6 +493,7 @@ async def request_return(session: AsyncSession, character: Character) -> None:
     if expedition.status == "returning":
         raise DomainError("already_returning", "Корабль уже возвращается.")
     _raise_if_repairing(expedition)
+    _raise_if_traveling(expedition)
     offered = await _current_offered_event(session, expedition)
     if offered is not None:
         snap = offered.snapshot
@@ -491,7 +528,35 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
     await session.flush()
 
 
+async def describe_travel(
+    session: AsyncSession, character: Character, expedition: Expedition
+) -> str:
+    """Экран путешествия между событиями: текст + индикатор топлива (как HP)."""
+    from core.battle import hp_bar
+
+    lang = character.lang
+    bar, pct = hp_bar(expedition.fuel_remaining, max(1, expedition.fuel_at_start))
+    return "\n".join(
+        [
+            t("travel_started", lang),
+            t("fuel_line", lang, cur=expedition.fuel_remaining, max=expedition.fuel_at_start),
+            f"{bar} {pct}%",
+        ]
+    )
+
+
 # --- «Залатать корабль» (ремонт в экспедиции) -------------------------------------
+
+
+def _raise_if_traveling(expedition: Expedition | None) -> None:
+    """В пути между событиями доступна только кнопка «Инфо»."""
+    if expedition is not None and expedition.next_event_at is not None:
+        now = datetime.now(UTC)
+        if expedition.next_event_at > now:
+            wait = int((expedition.next_event_at - now).total_seconds()) + 1
+            raise DomainError(
+                "traveling", f"Вы в пути — следующее событие через {wait}с.", details={"wait_sec": wait}
+            )
 
 
 def _raise_if_repairing(expedition: Expedition | None) -> None:
@@ -518,6 +583,7 @@ async def start_patch(session: AsyncSession, character: Character) -> int:
     if expedition is None or expedition.status != "active":
         raise DomainError("no_expedition", "Экспедиция не активна.")
     _raise_if_repairing(expedition)
+    _raise_if_traveling(expedition)
     offered = await _current_offered_event(session, expedition)
     if offered is not None:
         raise DomainError("event_pending", "Сначала завершите событие.")

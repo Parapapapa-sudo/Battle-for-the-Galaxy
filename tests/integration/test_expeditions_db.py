@@ -43,10 +43,29 @@ async def _outbox_texts(session, character) -> list[str]:
 
 
 
-async def _no_cooldown(session, expedition) -> None:
-    """Снять кулдаун между событиями (тесты не ждут реальные 10+ секунд)."""
+async def _go(session, character, expedition, rng=None) -> ExpeditionEvent | None:
+    """«Исследовать» + мгновенное прибытие события (в обход реальной задержки пути).
+
+    proceed() отправляет корабль в путь (таймер exp_event); здесь доводим
+    таймер до срабатывания напрямую. None — события нет (автовозврат по топливу).
+    """
+    rng = rng or random.Random(1)
+    await expeditions.proceed(session, character, rng=rng)
+    await session.refresh(expedition)
+    if expedition.status != "active" or expedition.next_event_at is None:
+        return None
+    next_seq = expedition.queue_pos  # seq события, которое создаст arrive_event
     expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
     await session.flush()
+    await expeditions.arrive_event(session, {"expedition_id": str(expedition.id)}, rng=rng)
+    # None, если событие не создано (автовозврат по топливу)
+    found: ExpeditionEvent | None = await session.scalar(
+        sa.select(ExpeditionEvent).where(
+            ExpeditionEvent.expedition_id == expedition.id,
+            ExpeditionEvent.seq == next_seq,
+        )
+    )
+    return found
 
 @requires_db
 async def test_launch_creates_expedition_with_queue(session, seeded):
@@ -81,8 +100,7 @@ async def test_go_spends_fuel_and_resolves_automatic_event(session, seeded):
 
     # очередь рандомна: крутим go, пока не встретим автоматическое событие
     for _ in range(20):
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
-        await _no_cooldown(session, expedition)
+        event = await _go(session, character, expedition, rng=random.Random(1))
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -103,8 +121,7 @@ async def test_interactive_event_choice_applies_grants(session, seeded):
     # ищем интерактивное событие, перебирая go/decline
     event = None
     for _ in range(25):
-        event, note = await expeditions.proceed(session, character, rng=random.Random(7))
-        await _no_cooldown(session, expedition)
+        event = await _go(session, character, expedition, rng=random.Random(7))
         if event is None:
             pytest.fail("топливо кончилось раньше, чем нашлось интерактивное событие")
         if event.snapshot["kind"] == "interactive":
@@ -132,8 +149,7 @@ async def test_decline_refusable_event_and_block_non_refusable(session, seeded):
     expedition = await expeditions.launch_expedition(session, character)
 
     for _ in range(25):
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(11))
-        await _no_cooldown(session, expedition)
+        event = await _go(session, character, expedition, rng=random.Random(11))
         if event is None:
             pytest.fail("топливо кончилось раньше времени")
         if event.snapshot["kind"] == "interactive":
@@ -154,8 +170,7 @@ async def test_voluntary_return_scenario(session, seeded):
 
     # во время активного события вернуться нельзя (ТЗ)
     for _ in range(25):
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(5))
-        await _no_cooldown(session, expedition)
+        event = await _go(session, character, expedition, rng=random.Random(5))
         if event is None:
             pytest.fail("топливо кончилось раньше времени")
         if event.snapshot["kind"] == "interactive":
@@ -210,18 +225,15 @@ async def test_fuel_empty_return_scenario(session, seeded):
     expedition = await expeditions.launch_expedition(session, character)
 
     # go пока топливо не кончится: любое событие стоит >= 1
-    note = ""
     for _ in range(30):
-        event, note = await expeditions.proceed(session, character, rng=random.Random(2))
-        ongoing = await expeditions.get_ongoing_expedition(session, character.id)
-        if ongoing is not None:
-            ongoing.next_event_at = None
-            await session.flush()
+        event = await _go(session, character, expedition, rng=random.Random(2))
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
             await expeditions.decline_event(session, character)
-    assert "Топливо исчерпано" in note
+    # автовозврат по топливу приходит уведомлением в outbox
+    texts = await _outbox_texts(session, character)
+    assert any("Топливо исчерпано" in text for text in texts)
 
     await session.refresh(expedition)
     assert expedition.status == "returning"
@@ -288,8 +300,7 @@ async def test_expedition_extends_queue_when_exhausted(session, seeded):
     for _ in range(initial_len + 5):
         if expedition.status != "active":
             break
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(9))
-        await _no_cooldown(session, expedition)
+        event = await _go(session, character, expedition, rng=random.Random(9))
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -311,8 +322,7 @@ async def test_queue_never_exceeds_unique_constraint(session, seeded):
     for _ in range(60):
         if expedition.status != "active":
             break
-        event, _ = await expeditions.proceed(session, character, rng=rng)
-        await _no_cooldown(session, expedition)
+        event = await _go(session, character, expedition, rng=rng)
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -322,23 +332,83 @@ async def test_queue_never_exceeds_unique_constraint(session, seeded):
 
 
 @requires_db
-async def test_event_cooldown_between_go(session, seeded):
-    """ТЗ: задержка между событиями — базовая + 1с за каждые 2 ед. потраченного топлива."""
+async def test_travel_between_events(session, seeded):
+    """ТЗ: между событиями — путешествие с задержкой 10с + (базовое топливо − текущее)/2.
+
+    В пути доступна только кнопка «Инфо»: go не плодит таймеры, return/patch
+    заблокированы, событие прибывает само по таймеру exp_event.
+    """
     character = await _character(session, seeded, fuel=50)
     expedition = await expeditions.launch_expedition(session, character)
 
-    event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
-    assert event is not None
-    if event.snapshot["kind"] == "interactive":
-        await expeditions.decline_event(session, character)
-    # повторный go сразу → кулдаун (база 10с + потраченное топливо // 2)
-    with pytest.raises(DomainError) as exc_info:
-        await expeditions.proceed(session, character, rng=random.Random(1))
-    assert exc_info.value.code == "event_cooldown"
+    # «Исследовать» → экран путешествия, события сразу нет
+    event, note = await expeditions.proceed(session, character, rng=random.Random(1))
+    assert event is None
+    assert "путешествие" in note
+    assert "Топливо: 50/50" in note
+    await session.refresh(expedition)
+    assert expedition.next_event_at is not None
+    assert expedition.next_event_at > datetime.now(UTC)
+    delay = (expedition.next_event_at - datetime.now(UTC)).total_seconds()
+    assert 9 < delay <= 10  # база 10с, топливо ещё не тратилось
 
-    await _no_cooldown(session, expedition)
-    event, _ = await expeditions.proceed(session, character, rng=random.Random(2))
-    assert event is not None  # после ожидания go снова работает
+    # повторный go в пути → тот же экран, новый таймер не создаётся
+    event2, note2 = await expeditions.proceed(session, character, rng=random.Random(1))
+    assert event2 is None and note2 == note
+    timers = (
+        await session.scalars(
+            sa.select(Timer).where(
+                Timer.character_id == character.id,
+                Timer.type == "exp_event",
+                Timer.status == "pending",
+            )
+        )
+    ).all()
+    assert len(timers) == 1
+
+    # в пути return и patch заблокированы
+    with pytest.raises(DomainError) as exc_info:
+        await expeditions.request_return(session, character)
+    assert exc_info.value.code == "traveling"
+    with pytest.raises(DomainError) as exc_info:
+        await expeditions.start_patch(session, character)
+    assert exc_info.value.code == "traveling"
+
+    # таймер срабатывает → событие прибыло, уведомление в outbox
+    expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.execute(
+        sa.update(Timer)
+        .where(Timer.type == "exp_event", Timer.status == "pending")
+        .values(fires_at=expedition.next_event_at)
+    )
+    await session.flush()
+    await expeditions.arrive_event(
+        session, {"expedition_id": str(expedition.id)}, rng=random.Random(1)
+    )
+    await session.refresh(expedition)
+    assert expedition.next_event_at is None  # снова свободное плавание
+    arrived = await expeditions._current_offered_event(session, expedition)
+    last = await session.scalar(
+        sa.select(ExpeditionEvent)
+        .where(ExpeditionEvent.expedition_id == expedition.id)
+        .order_by(ExpeditionEvent.seq.desc())
+        .limit(1)
+    )
+    assert arrived is not None or (last is not None and last.status == "resolved")
+    texts = await _outbox_texts(session, character)
+    assert any("Событие «" in text for text in texts)
+
+    # закрываем прибывшее событие, чтобы снова исследовать
+    if arrived is not None:
+        await expeditions.decline_event(session, character)
+
+    # задержка растёт от потраченного топлива: потрачено = fuel_cost первого события
+    spent = expedition.fuel_at_start - expedition.fuel_remaining
+    await expeditions.proceed(session, character, rng=random.Random(2))
+    await session.refresh(expedition)
+    assert expedition.next_event_at is not None
+    delay2 = (expedition.next_event_at - datetime.now(UTC)).total_seconds()
+    assert 9 + spent // 2 < delay2 <= 10 + spent // 2
 
 
 @requires_db
@@ -370,6 +440,5 @@ async def test_go_blocked_when_hull_too_low(session, seeded):
     await expeditions.patch_complete(session, {"expedition_id": str(expedition.id)})
     await session.refresh(ship)
     assert ship.current_hull == 100
-    await _no_cooldown(session, expedition)
-    event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
+    event = await _go(session, character, expedition, rng=random.Random(1))
     assert event is not None  # go снова работает

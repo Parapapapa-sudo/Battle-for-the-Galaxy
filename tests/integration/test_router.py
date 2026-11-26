@@ -126,8 +126,12 @@ async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
         text="launch", idempotency_key=_key(),
     )
 
-    # ищем интерактивное событие (кулдаун между событиями снимаем напрямую)
-    from app.expeditions import get_ongoing_expedition
+    # ищем интерактивное событие: go отправляет в путь, таймер доводим вручную,
+    # срабатывание — через команду sync (как без worker'а вживую)
+    from datetime import UTC, datetime, timedelta
+
+    from app.expeditions import _current_offered_event, get_ongoing_expedition
+    from app.models import Timer
 
     account, _ = await characters.get_or_create_account(
         session, platform="console", platform_user_id=user
@@ -140,17 +144,24 @@ async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
             bus, sessions, platform="console", platform_user_id=user,
             text="go", idempotency_key=_key(),
         )
-        # интерактивное событие открыто: заголовок есть, исхода ещё нет
-        if "Событие «" in r.message and "Исход:" not in r.message:
-            break
+        assert "путешествие" in r.message  # экран пути, событие ещё не прибыло
+        expedition = await get_ongoing_expedition(session, character.id)
+        assert expedition is not None
+        expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.execute(
+            sa.update(Timer)
+            .where(Timer.type == "exp_event", Timer.status == "pending")
+            .values(fires_at=expedition.next_event_at)
+        )
+        await session.flush()
         await route_text_command(
             bus, sessions, platform="console", platform_user_id=user,
-            text="decline", idempotency_key=_key(),
+            text="sync", idempotency_key=_key(),
         )
-        expedition = await get_ongoing_expedition(session, character.id)
-        if expedition is not None:
-            expedition.next_event_at = None
-            await session.flush()
+        offered = await _current_offered_event(session, expedition)
+        if offered is not None and offered.snapshot["kind"] == "interactive":
+            break
+        # автоматическое событие разрешилось само — идём дальше
     else:
         pytest.fail("интерактивное событие не встретилось")
 

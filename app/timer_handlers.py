@@ -64,6 +64,11 @@ async def build_timer_handlers() -> TimerHandlers:
 
         await patch_complete(session, payload)
 
+    async def exp_event(session: AsyncSession, payload: stores.Params) -> None:
+        from app.expeditions import arrive_event
+
+        await arrive_event(session, payload)
+
     return {
         "ping": ping,
         "exp_return_arrival": exp_return_arrival,
@@ -75,6 +80,7 @@ async def build_timer_handlers() -> TimerHandlers:
         "faction_event_start": faction_event_start,
         "faction_event_end": faction_event_end,
         "ship_patch": ship_patch,
+        "exp_event": exp_event,
     }
 
 

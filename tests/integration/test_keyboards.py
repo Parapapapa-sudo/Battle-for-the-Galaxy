@@ -1,15 +1,38 @@
 """VK-клавиатуры: структура JSON и смена меню по состоянию игрока."""
 import random
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import battles, characters, expeditions
 from app.keyboards import keyboard_for_character, vk_keyboard
-from app.models_game import Character
+from app.models_game import Character, ExpeditionEvent
 from tests.conftest import requires_db
+
+
+async def _go(session, character, expedition, rng=None) -> ExpeditionEvent | None:
+    """«Исследовать» + мгновенное прибытие события (в обход задержки пути)."""
+    rng = rng or random.Random(1)
+    await expeditions.proceed(session, character, rng=rng)
+    await session.refresh(expedition)
+    if expedition.status != "active" or expedition.next_event_at is None:
+        return None
+    next_seq = expedition.queue_pos  # seq события, которое создаст arrive_event
+    expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+    await expeditions.arrive_event(session, {"expedition_id": str(expedition.id)}, rng=rng)
+    # None, если событие не создано (автовозврат по топливу)
+    found: ExpeditionEvent | None = await session.scalar(
+        sa.select(ExpeditionEvent).where(
+            ExpeditionEvent.expedition_id == expedition.id,
+            ExpeditionEvent.seq == next_seq,
+        )
+    )
+    return found
 
 
 def test_vk_keyboard_structure() -> None:
@@ -65,8 +88,33 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     expedition = await expeditions.launch_expedition(session, character)
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
-    # свободное плавание: Исследовать / Инфо / Залатать корабль / Вернуться
-    assert {"Исследовать", "Инфо", "Залатать корабль"} <= set(_labels(kb))
+    # свободное плавание: [Исследовать][Залатать корабль] / [Инфо][В космопорт]
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows == [["Исследовать", "Залатать корабль"], ["Инфо", "В космопорт"]]
+
+    # в пути между событиями — только «Инфо»
+    await expeditions.proceed(session, character, rng=random.Random(1))
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    assert _labels(kb) == ["Инфо"]
+    expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+    await expeditions.arrive_event(session, {"expedition_id": str(expedition.id)})
+    await session.refresh(expedition)
+    if expedition.status == "active":
+        last = await session.scalar(
+            sa.select(ExpeditionEvent)
+            .where(ExpeditionEvent.expedition_id == expedition.id)
+            .order_by(ExpeditionEvent.seq.desc())
+            .limit(1)
+        )
+        if last is not None and last.status == "offered":
+            await expeditions.decline_event(session, character)
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    if expedition.status == "active":
+        assert rows == [["Исследовать", "Залатать корабль"], ["Инфо", "В космопорт"]]
 
     # кнопка способности появляется, только если модуль установлен
     await battles.start_battle(
@@ -82,13 +130,9 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
 @requires_db
 async def test_interactive_event_shows_choice_buttons(session, seeded):
     character = await _character(session, seeded)
-    await expeditions.launch_expedition(session, character)
+    expedition = await expeditions.launch_expedition(session, character)
     for _ in range(40):
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(3))
-        ongoing = await expeditions.get_ongoing_expedition(session, character.id)
-        if ongoing is not None:
-            ongoing.next_event_at = None
-            await session.flush()
+        event = await _go(session, character, expedition, rng=random.Random(3))
         if event is None:
             pytest.fail("топливо кончилось раньше события с выбором")
         if event.snapshot["kind"] == "interactive":

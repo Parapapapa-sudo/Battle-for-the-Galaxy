@@ -176,6 +176,15 @@ async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, An
     offered = await expeditions._current_offered_event(session, expedition)
     if offered is not None:
         return CommandResult(message=expeditions.describe_event(offered, lang=lang))
+    from datetime import UTC, datetime
+
+    if expedition.next_event_at is not None and expedition.next_event_at > datetime.now(UTC):
+        wait = int((expedition.next_event_at - datetime.now(UTC)).total_seconds()) + 1
+        return CommandResult(
+            message=await expeditions.describe_travel(session, character, expedition)
+            + "\n"
+            + t("travel_eta", lang, wait=wait)
+        )
     low = int(await stores.get_param(session, "danger.low_max", 3))
     high = int(await stores.get_param(session, "danger.high_min", 7))
     last = await session.scalar(

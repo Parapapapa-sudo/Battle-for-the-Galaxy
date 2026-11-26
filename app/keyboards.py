@@ -113,8 +113,14 @@ async def keyboard_for_character(
         offered = await _current_offered_event(session, expedition)
         if offered is not None and offered.snapshot.get("kind") == "interactive":
             return vk_keyboard(_event_choice_rows(offered.snapshot, lang), lang)
-        # свободное плавание: исследовать / инфо / залатать / вернуться
-        return vk_keyboard([["go", "exp", "patch"], ["return"]], lang)
+        # в пути между событиями — только «Инфо»
+        if expedition.next_event_at is not None:
+            from datetime import UTC, datetime
+
+            if expedition.next_event_at > datetime.now(UTC):
+                return vk_keyboard([["exp"]], lang)
+        # свободное плавание: [Исследовать][Залатать корабль] / [Инфо][В космопорт]
+        return vk_keyboard([["go", "patch"], ["exp", "return"]], lang)
 
     return vk_keyboard(
         [

@@ -10,6 +10,7 @@ from app.bus import CommandBus
 from app.models_game import (
     Character,
     CharacterQuest,
+    ExpeditionEvent,
     FactionEventParticipant,
     QuestTemplate,
     Ship,
@@ -43,6 +44,29 @@ async def _run_due(session, bus=None) -> int:
     return int(await bus.run_due_timers(timer_handlers=handlers, session=session))
 
 
+async def _go(
+    session, character, expedition, rng: random.Random | None = None
+) -> ExpeditionEvent | None:
+    """«Исследовать» + мгновенное прибытие события (в обход задержки пути)."""
+    rng = rng or random.Random(1)
+    await expeditions.proceed(session, character, rng=rng)
+    await session.refresh(expedition)
+    if expedition.status != "active" or expedition.next_event_at is None:
+        return None
+    next_seq = expedition.queue_pos  # seq события, которое создаст arrive_event
+    expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+    await expeditions.arrive_event(session, {"expedition_id": str(expedition.id)}, rng=rng)
+    # None, если событие не создано (автовозврат по топливу)
+    found: ExpeditionEvent | None = await session.scalar(
+        sa.select(ExpeditionEvent).where(
+            ExpeditionEvent.expedition_id == expedition.id,
+            ExpeditionEvent.seq == next_seq,
+        )
+    )
+    return found
+
+
 @requires_db
 async def test_first_quest_active_at_creation(session, seeded):
     """ТЗ: первое сюжетное задание обязательно — активируется при создании."""
@@ -66,9 +90,7 @@ async def test_tutorial_chain_progression(session, seeded, bus):
 
     # шаг 2: два разрешённых события (отклонения не считаются — считаем resolved)
     for attempt in range(40):
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(3))
-        expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
-        await session.flush()
+        event = await _go(session, character, expedition, rng=random.Random(3))
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
@@ -112,9 +134,7 @@ async def test_tutorial_chain_progression(session, seeded, bus):
         active = await quests.active_quests(session, character)
         if not active or active[0][1].code != "tutorial_2":
             break
-        event, _ = await expeditions.proceed(session, character, rng=random.Random(8))
-        expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
-        await session.flush()
+        event = await _go(session, character, expedition, rng=random.Random(8))
         if event is None:
             break
         if event.snapshot["kind"] == "interactive":
