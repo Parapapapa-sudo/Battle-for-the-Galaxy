@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import signal
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -91,7 +92,9 @@ async def run_worker(
 
 
 class _PrintSender:
-    async def send(self, *, character_id: str, text: str, platform: str | None) -> None:
+    async def send(
+        self, *, character_id: str, text: str, platform: str | None, payload: dict[str, Any] | None = None
+    ) -> None:
         log.info("outbox_message", to=character_id, platform=platform, text=text)
 
 

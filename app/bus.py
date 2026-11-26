@@ -49,12 +49,15 @@ class CommandResult:
     message: str
     data: dict[str, Any] = field(default_factory=dict)
     messages: list[OutgoingMessage] = field(default_factory=list)
+    # пак картинок (assets/images/<пак>); адаптер прикладывает случайное фото
+    image_pack: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "message": self.message,
             "data": self.data,
             "messages": [m.__dict__ for m in self.messages],
+            "image_pack": self.image_pack,
         }
 
     @staticmethod
@@ -63,6 +66,7 @@ class CommandResult:
             message=raw.get("message", ""),
             data=raw.get("data", {}),
             messages=[OutgoingMessage(**m) for m in raw.get("messages", [])],
+            image_pack=raw.get("image_pack"),
         )
 
 

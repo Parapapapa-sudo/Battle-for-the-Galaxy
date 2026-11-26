@@ -7,7 +7,7 @@
 import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Protocol
+from typing import Any, Protocol
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,14 @@ SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 class Sender(Protocol):
     """Транспорт отправки. Реализации: консоль (dev), VK (этап 1), Telegram (позже)."""
 
-    async def send(self, *, character_id: str, text: str, platform: str | None) -> None: ...
+    async def send(
+        self,
+        *,
+        character_id: str,
+        text: str,
+        platform: str | None,
+        payload: dict[str, Any] | None = None,
+    ) -> None: ...
 
 
 class OutboxDispatcher:
@@ -58,6 +65,7 @@ class OutboxDispatcher:
                         character_id=str(msg.character_id),
                         text=msg.text,
                         platform=msg.platform,
+                        payload=msg.payload,
                     )
                     msg.status = "sent"
                     msg.sent_at = now

@@ -2,6 +2,7 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,9 @@ class _RecordingSender:
         self.calls = 0
         self.fail_times = fail_times
 
-    async def send(self, *, character_id: str, text: str, platform: str | None) -> None:
+    async def send(
+        self, *, character_id: str, text: str, platform: str | None, payload: dict[str, Any] | None = None
+    ) -> None:
         self.calls += 1
         if self.calls <= self.fail_times:
             raise ConnectionError("platform down")

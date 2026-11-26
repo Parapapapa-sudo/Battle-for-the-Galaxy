@@ -252,10 +252,14 @@ async def arrive_event(
     if template.kind == "automatic":
         variant = pick_variant(template.script.get("variants", []), rng)
         await _apply_outcome(session, character, expedition, event, variant, rng)
+        from app.battles import get_active_battle
+
+        pack = "battle" if await get_active_battle(session, character.id) is not None else None
         await stores.add_outbox(
             session,
             character_id=character.id,
             text=describe_event(event, lang=lang),
+            payload={"image_pack": pack} if pack else None,
         )
         await _queue_status(session, character)  # состояние — после исхода события
     else:
@@ -561,6 +565,7 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
             depth=expedition.depth,
             fuel=expedition.fuel_remaining,
         ),
+        payload={"image_pack": "port_main"},
     )
     await session.flush()
 

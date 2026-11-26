@@ -289,6 +289,7 @@ async def cmd_launch(session: AsyncSession, ctx: CommandContext, args: dict[str,
     return CommandResult(
         message=t("launch_started", character.lang, fuel=expedition.fuel_remaining),
         data={"expedition_id": str(expedition.id)},
+        image_pack="travel",
     )
 
 
@@ -297,7 +298,7 @@ async def cmd_go(session: AsyncSession, ctx: CommandContext, args: dict[str, Any
     lang = character.lang
     event, note = await expeditions.proceed(session, character)
     if event is None:
-        return CommandResult(message=note)
+        return CommandResult(message=note, image_pack="travel")
     low = int(await stores.get_param(session, "danger.low_max", 3))
     high = int(await stores.get_param(session, "danger.high_min", 7))
     text = expeditions.describe_event(event, lang=lang, low_max=low, high_min=high)
@@ -312,7 +313,12 @@ async def cmd_choice(session: AsyncSession, ctx: CommandContext, args: dict[str,
     if not key:
         raise DomainError("bad_choice", t("choice_missing_arg", character.lang))
     event = await expeditions.resolve_choice(session, character, key)
-    return CommandResult(message=expeditions.describe_event(event, lang=character.lang))
+    from app.battles import get_active_battle
+
+    pack = "battle" if await get_active_battle(session, character.id) is not None else None
+    return CommandResult(
+        message=expeditions.describe_event(event, lang=character.lang), image_pack=pack
+    )
 
 
 async def cmd_decline(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -824,7 +830,7 @@ async def cmd_hall(session: AsyncSession, ctx: CommandContext, args: dict[str, A
         raise DomainError("expedition_ongoing", t("hall_in_expedition", lang))
     character.hall = hall
     await session.flush()
-    return CommandResult(message=t(HALL_TITLES[hall], lang))
+    return CommandResult(message=t(HALL_TITLES[hall], lang), image_pack=f"port_{hall}")
 
 
 async def cmd_patch(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:

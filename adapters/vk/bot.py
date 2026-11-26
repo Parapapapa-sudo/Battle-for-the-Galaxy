@@ -165,13 +165,19 @@ STALE_UPDATE_SEC = 120
 
 
 async def _send_with_retry(
-    api: VkApi, user_id: int, text: str, keyboard: dict[str, Any] | None, *, attempts: int = 4
+    api: VkApi,
+    user_id: int,
+    text: str,
+    keyboard: dict[str, Any] | None,
+    *,
+    attachment: str | None = None,
+    attempts: int = 4,
 ) -> None:
     """Прямые ответы обходят outbox-пейсинг — при лимите VK (20 msg/с) ретраим с бэкоффом."""
     delay = 1.0
     for attempt in range(attempts):
         try:
-            await api.send_message(user_id, text, keyboard=keyboard)
+            await api.send_message(user_id, text, keyboard=keyboard, attachment=attachment)
             return
         except VkRateLimited:
             if attempt == attempts - 1:
@@ -220,7 +226,16 @@ async def _handle_update(bus: CommandBus, api: VkApi, update: dict[str, Any]) ->
             idempotency_key=key,
         )
         keyboard = await _keyboard_for_user(str(user_id))
-        await _send_with_retry(api, int(user_id), result.message[:4000], keyboard)
+        attachment = None
+        if result.image_pack:
+            from adapters.vk.images import attachment_for
+
+            attachment = await attachment_for(
+                api, db.session_factory, result.image_pack, int(user_id)
+            )
+        await _send_with_retry(
+            api, int(user_id), result.message[:4000], keyboard, attachment=attachment
+        )
     except DomainError as exc:
         keyboard = await _keyboard_for_user(str(user_id))
         await _send_with_retry(api, int(user_id), exc.message[:4000], keyboard)

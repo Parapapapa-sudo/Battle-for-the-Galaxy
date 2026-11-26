@@ -4,9 +4,11 @@
 код 6 (too many requests per second) → VkRateLimited. Остальные — VkApiError
 (без ретрая: отправка бессмысленна, запись уйдёт в failed и заметит алерт).
 """
+import asyncio
 import json
 import random
 import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -75,7 +77,12 @@ class VkApi:
         return data
 
     async def send_message(
-        self, user_id: int, text: str, *, keyboard: dict[str, Any] | None = None
+        self,
+        user_id: int,
+        text: str,
+        *,
+        keyboard: dict[str, Any] | None = None,
+        attachment: str | None = None,
     ) -> int:
         params: dict[str, Any] = {
             "user_id": user_id,
@@ -84,8 +91,31 @@ class VkApi:
         }
         if keyboard is not None:
             params["keyboard"] = json.dumps(keyboard, ensure_ascii=False)
+        if attachment:
+            params["attachment"] = attachment
         response = await self.call("messages.send", **params)
         return int(response)
+
+    async def upload_message_photo(self, peer_id: int, path: Path) -> str:
+        """Загрузка фото для сообщений: upload-сервер → файл → saveMessagesPhoto.
+
+        Возвращает attachment-строку «photo<owner>_<id>» — её можно переиспользовать
+        в любых сообщениях сообщества (кэшируется в app.images).
+        """
+        server = await self.call("photos.getMessagesUploadServer", peer_id=peer_id)
+        content = await asyncio.to_thread(path.read_bytes)
+        resp = await self._http.post(
+            server["upload_url"], files={"photo": (path.name, content)}
+        )
+        uploaded = resp.json()
+        saved = await self.call(
+            "photos.saveMessagesPhoto",
+            server=uploaded["server"],
+            photo=uploaded["photo"],
+            hash=uploaded["hash"],
+        )
+        photo = saved[0]
+        return f"photo{photo['owner_id']}_{photo['id']}"
 
 
 class VkSender:
@@ -97,7 +127,14 @@ class VkSender:
         self._sessions = sessions
         self._api = api
 
-    async def send(self, *, character_id: str, text: str, platform: str | None) -> None:
+    async def send(
+        self,
+        *,
+        character_id: str,
+        text: str,
+        platform: str | None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         # уведомление приходит с АКТУАЛЬНОЙ клавиатурой — меню обновляется без команд от игрока
         keyboard: dict[str, Any] | None = None
         async with self._sessions() as session:
@@ -117,5 +154,15 @@ class VkSender:
                     )
                 )
             ).all()
+        image_pack = (payload or {}).get("image_pack")
         for user_id in rows:
-            await self._api.send_message(int(user_id), text, keyboard=keyboard)
+            attachment = None
+            if image_pack:
+                from adapters.vk.images import attachment_for
+
+                attachment = await attachment_for(
+                    self._api, self._sessions, str(image_pack), int(user_id)
+                )
+            await self._api.send_message(
+                int(user_id), text, keyboard=keyboard, attachment=attachment
+            )
