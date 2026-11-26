@@ -68,24 +68,40 @@ async def _go(
 
 
 @requires_db
-async def test_first_quest_active_at_creation(session, seeded):
-    """ТЗ: первое сюжетное задание обязательно — активируется при создании."""
+async def test_first_quest_available_at_creation(session, seeded):
+    """ТЗ: первое сюжетное задание обязательно — предлагается при создании,
+    игрок принимает его кнопкой (available → active, оно же отслеживается)."""
     character = await _character(session, seeded)
-    active = await _active_quest(session, character)
-    assert active is not None
-    state, quest = active
+    assert await quests.active_quests(session, character) == []
+    available = await quests.available_quests(session, character)
+    assert available and available[0][1].code == "tutorial_1"
+
+    quest = await quests.accept_quest(session, character, "tutorial_1")
     assert quest.code == "tutorial_1"
+    active = await quests.active_quests(session, character)
+    assert active and active[0][1].code == "tutorial_1"
+    assert character.tracked_quest == "tutorial_1"
+
+    # повторное принятие невозможно
+    import pytest
+
+    from core.errors import DomainError
+
+    with pytest.raises(DomainError):
+        await quests.accept_quest(session, character, "tutorial_1")
 
 
 @requires_db
 async def test_tutorial_chain_progression(session, seeded, bus):
-    """Цепочка: вылет → события → победа → крафт; награды атомарны."""
+    """Цепочка: принятие → вылет → события → победа → крафт; награды атомарны."""
     character = await _character(session, seeded)
 
-    # шаг 1: вылет
+    # шаг 1: принять первое задание и вылететь
+    await quests.accept_quest(session, character, "tutorial_1")
     expedition = await expeditions.launch_expedition(session, character)
-    state, quest = (await quests.active_quests(session, character))[0]
-    assert quest.code == "tutorial_2"  # tutorial_1 завершено, активно следующее
+    # tutorial_1 завершено; следующее — ДОСТУПНО, принимаем
+    assert await quests.active_quests(session, character) == []
+    await quests.accept_quest(session, character, "tutorial_2")
     assert character.xp_pool >= 10
 
     # шаг 2: два разрешённых события (отклонения не считаются — считаем resolved)
@@ -112,9 +128,10 @@ async def test_tutorial_chain_progression(session, seeded, bus):
         if attempt + 1 >= 2:
             break
     active = await quests.active_quests(session, character)
-    # tutorial_3 — после двух событий; но засада пиратов могла начать бой на шаге 2
-    # раньше второго события — тогда добор произойдёт после победы
-    assert active and active[0][1].code in ("tutorial_2", "tutorial_3")
+    # tutorial_2 ещё идёт, либо завершено (tutorial_3 тогда ДОСТУПНО)
+    assert (active and active[0][1].code == "tutorial_2") or (
+        not active and (await quests.available_quests(session, character))
+    )
 
     # шаг 3: победа в бою (засада могла начать бой уже на шаге 2)
     # буст корпуса: бой против любого пирата детерминированно выигрышный
@@ -153,8 +170,11 @@ async def test_tutorial_chain_progression(session, seeded, bus):
                 session, character, str(safe["key"]), rng=random.Random(1)
             )
 
-    # прогресс засчитывается только АКТИВНОМУ заданию: если победа в бою случилась
-    # до активации tutorial_3, дерёмся ещё раз — уже под активным заданием
+    # принимаем tutorial_3 (стал доступен после tutorial_2): прогресс засчитывается
+    # только АКТИВНОМУ заданию — победу добираем под принятым заданием
+    available = await quests.available_quests(session, character)
+    if available:
+        await quests.accept_quest(session, character, available[0][1].code)
     for _ in range(3):
         active = await quests.active_quests(session, character)
         if not active or active[0][1].code != "tutorial_3":
@@ -171,8 +191,9 @@ async def test_tutorial_chain_progression(session, seeded, bus):
                 break
         assert battle.status == "won"
 
-    active = await quests.active_quests(session, character)
-    assert active and active[0][1].code == "story_1"
+    # story_1 стал доступен — принимаем перед крафтом
+    assert await quests.active_quests(session, character) == []
+    await quests.accept_quest(session, character, "story_1")
 
     # перед крафтом — возвращаемся в порт (производство только там)
     await expeditions.request_return(session, character)
@@ -201,6 +222,42 @@ async def test_tutorial_chain_progression(session, seeded, bus):
         )
     ).all()
     assert len(completed) == 4
+
+
+@requires_db
+async def test_quest_tracking_sends_progress_to_chat(session, seeded):
+    """Отслеживание: прогресс отслеживаемого задания приходит в чат (outbox)."""
+    import pytest
+
+    from app.models import Outbox
+    from core.errors import DomainError
+
+    character = await _character(session, seeded)
+    await quests.accept_quest(session, character, "tutorial_1")
+    expedition = await expeditions.launch_expedition(session, character)  # tutorial_1 выполнено
+    assert character.tracked_quest is None  # с завершением отслеживание снялось
+    await quests.accept_quest(session, character, "tutorial_2")  # оно же отслеживается
+
+    event = await _go(session, character, expedition, rng=random.Random(7))
+    assert event is not None
+    if event.snapshot["kind"] == "interactive":
+        safe = next(
+            (c for c in event.snapshot["script"]["choices"] if "battle" not in (c.get("outcome") or {})),
+            event.snapshot["script"]["choices"][-1],
+        )
+        await expeditions.resolve_choice(session, character, str(safe["key"]), rng=random.Random(1))
+
+    texts = [
+        r.text
+        for r in (
+            await session.scalars(sa.select(Outbox).where(Outbox.character_id == character.id))
+        ).all()
+    ]
+    assert any("«Среди звёзд»" in text and "событий разрешено" in text for text in texts)
+
+    # сменить отслеживание можно только на АКТИВНОЕ задание
+    with pytest.raises(DomainError):
+        await quests.track_quest(session, character, "story_1")
 
 
 @requires_db
@@ -240,7 +297,7 @@ async def test_faction_event_common_goal_and_contributions(session, seeded):
         assert participant is not None
         assert participant.rewards_granted
         balance, _ = await _balances(session, character)
-        assert balance == 700  # 200 (обучение) + 500 награда события
+        assert balance == 500  # награда события (обучение не принималось — без его наград)
 
 
 async def _balances(session, character) -> tuple[int, int]:

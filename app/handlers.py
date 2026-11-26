@@ -797,30 +797,47 @@ async def cmd_sync(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     )
 
 
+async def cmd_accept(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Принять доступное задание (кнопка «Принять» или accept <код>)."""
+    character = await _load(session, ctx)
+    code = str(args.get("rest", "")).strip()
+    quest = await quests_mod.accept_quest(session, character, code)
+    return CommandResult(
+        message=t("accept_ok", character.lang, name=quest.name)
+        + "\n"
+        + quest.description
+    )
+
+
+async def cmd_track(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Сменить отслеживаемое задание (track <код>)."""
+    character = await _load(session, ctx)
+    code = str(args.get("rest", "")).strip()
+    quest = await quests_mod.track_quest(session, character, code)
+    return CommandResult(message=t("track_ok", character.lang, name=quest.name))
+
+
 async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     lang = character.lang
     active = await quests_mod.active_quests(session, character)
-    blocks: list[str] = [t("quests_title", lang)] if active else []
+    available = await quests_mod.available_quests(session, character)
+    blocks: list[str] = [t("quests_title", lang)] if active or available else []
     for state, quest in active:
-        parts = []
-        for idx, objective in enumerate(quest.objectives):
-            need = int(objective.get("count", 1))
-            have = min(int(state.progress.get(str(idx), 0)), need)
-            otype = str(objective.get("type"))
-            label = t(f"obj_{otype}", lang)
-            if label == f"obj_{otype}":  # неизвестный тип цели — показываем код как есть
-                label = otype
-            parts.append(f"{label}: {have}/{need}")
+        tracked = t("quest_tracked_mark", lang) if character.tracked_quest == quest.code else ""
         blocks.append(
-            t(
-                "quest_item",
+            f"«{quest.name}»{tracked}\n{quest.description}\n"
+            + t(
+                "quest_progress_line",
                 lang,
-                name=quest.name,
-                description=quest.description,
-                progress=", ".join(parts),
+                progress=quests_mod.quest_progress_line(state, quest, lang),
             )
         )
+    if available:
+        lines = [t("quests_available_title", lang)]
+        for _state, quest in available:
+            lines.append(t("quest_available_item", lang, name=quest.name, description=quest.description))
+        blocks.append("\n\n".join(lines))
     now = datetime.now(UTC)
     events = (
         await session.scalars(
@@ -999,6 +1016,8 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "shop": cmd_shop,
     "buy": cmd_buy,
     "quests": cmd_quests,
+    "accept": cmd_accept,
+    "track": cmd_track,
     "sync": cmd_sync,
     # ремонт в экспедиции
     "patch": cmd_patch,

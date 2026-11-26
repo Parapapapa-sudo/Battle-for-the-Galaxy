@@ -27,7 +27,7 @@ from core.errors import DomainError
 
 
 async def activate_first_quests(session: AsyncSession, character: Character) -> None:
-    """Обучение: активируем задание с chain_order=1 (общее или фракционное)."""
+    """Обучение: первое задание цепочки становится ДОСТУПНЫМ (ждёт принятия)."""
     quest = await session.scalar(
         sa.select(QuestTemplate)
         .where(
@@ -43,7 +43,7 @@ async def activate_first_quests(session: AsyncSession, character: Character) -> 
     )
     if quest is None:
         return
-    session.add(CharacterQuest(character_id=character.id, quest_id=quest.id))
+    session.add(CharacterQuest(character_id=character.id, quest_id=quest.id, status="available"))
     await session.flush()
 
 
@@ -57,6 +57,80 @@ async def active_quests(session: AsyncSession, character: Character) -> list[tup
         )
     ).all()
     return [(cq, qt) for cq, qt in rows]
+
+
+async def available_quests(
+    session: AsyncSession, character: Character
+) -> list[tuple[CharacterQuest, QuestTemplate]]:
+    """Предложенные задания, ожидающие принятия игроком."""
+    rows = (
+        await session.execute(
+            sa.select(CharacterQuest, QuestTemplate)
+            .join(QuestTemplate, QuestTemplate.id == CharacterQuest.quest_id)
+            .where(
+                CharacterQuest.character_id == character.id,
+                CharacterQuest.status == "available",
+            )
+            .order_by(QuestTemplate.chain_order)
+        )
+    ).all()
+    return [(cq, qt) for cq, qt in rows]
+
+
+def quest_progress_line(quest_state: CharacterQuest, quest: QuestTemplate, lang: str) -> str:
+    """Строка прогресса с русскими названиями целей (для чата и списка заданий)."""
+    from app.locale import t
+
+    parts = []
+    for idx, objective in enumerate(quest.objectives):
+        need = int(objective.get("count", 1))
+        have = min(int(quest_state.progress.get(str(idx), 0)), need)
+        otype = str(objective.get("type"))
+        label = t(f"obj_{otype}", lang)
+        if label == f"obj_{otype}":  # неизвестный тип — код как есть
+            label = otype
+        parts.append(f"{label}: {have}/{need}")
+    return ", ".join(parts)
+
+
+async def accept_quest(session: AsyncSession, character: Character, code: str) -> QuestTemplate:
+    """Принятие доступного задания: available → active; оно же становится отслеживаемым."""
+    row = (
+        await session.execute(
+            sa.select(CharacterQuest, QuestTemplate)
+            .join(QuestTemplate, QuestTemplate.id == CharacterQuest.quest_id)
+            .where(
+                CharacterQuest.character_id == character.id,
+                CharacterQuest.status == "available",
+                QuestTemplate.code == code,
+            )
+        )
+    ).first()
+    if row is None:
+        raise DomainError("no_quest", f"Задание «{code}» недоступно для принятия.")
+    quest_state, quest = row
+    quest_state.status = "active"
+    character.tracked_quest = quest.code
+    await session.flush()
+    return quest
+
+
+async def track_quest(session: AsyncSession, character: Character, code: str) -> QuestTemplate:
+    """Сменить отслеживаемое задание (должно быть активным)."""
+    quest = await session.scalar(
+        sa.select(QuestTemplate)
+        .join(CharacterQuest, CharacterQuest.quest_id == QuestTemplate.id)
+        .where(
+            CharacterQuest.character_id == character.id,
+            CharacterQuest.status == "active",
+            QuestTemplate.code == code,
+        )
+    )
+    if quest is None:
+        raise DomainError("no_quest", f"Активное задание «{code}» не найдено.")
+    character.tracked_quest = quest.code
+    await session.flush()
+    return quest
 
 
 async def track(session: AsyncSession, character: Character, event_type: str, data: dict[str, Any] | None = None) -> None:
@@ -77,6 +151,20 @@ async def track(session: AsyncSession, character: Character, event_type: str, da
             changed = True
         if changed and _quest_complete(quest_state, quest):
             await _complete_quest(session, character, quest_state, quest)
+        elif changed and character.tracked_quest == quest.code:
+            # отслеживание: прогресс приходит в чат при каждом изменении
+            from app.locale import t
+
+            await stores.add_outbox(
+                session,
+                character_id=character.id,
+                text=t(
+                    "quest_progress",
+                    character.lang,
+                    name=quest.name,
+                    progress=quest_progress_line(quest_state, quest, character.lang),
+                ),
+            )
 
     await _track_faction_event(session, character, event_type)
 
@@ -95,8 +183,12 @@ async def _complete_quest(
     quest_state: CharacterQuest,
     quest: QuestTemplate,
 ) -> None:
+    from app.locale import t
+
     quest_state.status = "completed"
     quest_state.completed_at = datetime.now(UTC)
+    if character.tracked_quest == quest.code:
+        character.tracked_quest = None  # отслеживание завершённого снимается
 
     rewards = quest.rewards or {}
     for grant in rewards.get("items", []):
@@ -112,10 +204,10 @@ async def _complete_quest(
     await stores.add_outbox(
         session,
         character_id=character.id,
-        text=f"Задание «{quest.name}» выполнено! Награды начислены.",
+        text=t("quest_completed", character.lang, name=quest.name),
     )
 
-    # следующее в цепочке
+    # следующее в цепочке — становится ДОСТУПНЫМ (ждёт принятия)
     nxt = await session.scalar(
         sa.select(QuestTemplate).where(
             QuestTemplate.status == "published",
@@ -133,11 +225,18 @@ async def _complete_quest(
             )
         )
         if existing is None:
-            session.add(CharacterQuest(character_id=character.id, quest_id=nxt.id))
+            session.add(
+                CharacterQuest(character_id=character.id, quest_id=nxt.id, status="available")
+            )
             await stores.add_outbox(
                 session,
                 character_id=character.id,
-                text=f"Новое задание: «{nxt.name}». {nxt.description}",
+                text=t(
+                    "quest_new_available",
+                    character.lang,
+                    name=nxt.name,
+                    description=nxt.description,
+                ),
             )
     await session.flush()
 

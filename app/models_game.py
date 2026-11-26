@@ -92,6 +92,8 @@ class Character(Base, TimestampMixin):
     build_resets: Mapped[int] = mapped_column(default=0)  # число сбросов сборки (стоимость растёт)
     lang: Mapped[str] = mapped_column(String(8), default="ru")  # i18n: пока активен только ru
     hall: Mapped[str] = mapped_column(String(16), default="main")  # зал космопорта: main|workshop|hq
+    # отслеживаемое задание (код): прогресс приходит в чат при каждом изменении
+    tracked_quest: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Reputation(Base):

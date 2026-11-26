@@ -16,6 +16,8 @@ COLOR_BY_COMMAND = {
     "go": "positive",
     "launch": "positive",
     "patch": "positive",
+    "accept": "positive",
+    "track": "primary",
     "retreat": "negative",
     "decline": "negative",
 }
@@ -139,13 +141,21 @@ async def keyboard_for_character(
             lang,
         )
     if hall == "hq":
-        return vk_keyboard(
-            [
-                ["quests", "shop"],
-                [("hall main", t("kb_hall_main", lang))],
-            ],
-            lang,
-        )
+        hq_rows: list[list[Any]] = [["quests", "shop"]]
+        # принятие доступных заданий и переключение отслеживания — прямо кнопками
+        from app import quests as quests_mod
+
+        for _state, quest in (await quests_mod.available_quests(session, character))[:3]:
+            hq_rows.append(
+                [(f"accept {quest.code}", t("kb_accept_quest", lang, name=quest.name))]
+            )
+        for _state, quest in (await quests_mod.active_quests(session, character))[:3]:
+            if quest.code != character.tracked_quest:
+                hq_rows.append(
+                    [(f"track {quest.code}", t("kb_track_quest", lang, name=quest.name))]
+                )
+        hq_rows.append([("hall main", t("kb_hall_main", lang))])
+        return vk_keyboard(hq_rows, lang)
     return vk_keyboard(
         [
             ["launch", "me"],

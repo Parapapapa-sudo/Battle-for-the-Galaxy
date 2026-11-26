@@ -116,13 +116,17 @@ async def test_port_halls_navigation(session, seeded):
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     assert rows == [["Модули", "Крафт"], ["Инвентарь", "О корабле"], ["В основной зал"]]
 
-    # штаб
+    # штаб: задания/магазин + кнопка принятия доступного задания (tutorial_1)
     character.hall = "hq"
     await session.flush()
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Задания", "Магазин"], ["В основной зал"]]
+    assert rows == [
+        ["Задания", "Магазин"],
+        ["Принять «Первый вылет»"],
+        ["В основной зал"],
+    ]
 
 
 @requires_db
