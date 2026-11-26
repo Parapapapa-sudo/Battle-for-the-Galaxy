@@ -160,7 +160,7 @@ QUESTS: list[dict[str, Any]] = [
     dict(
         code="tutorial_1",
         name="Первый вылет",
-        description="Отправьтесь в экспедицию: launch, затем go.",
+        description="Отправьтесь в экспедицию: нажмите «Экспедиция», затем «Исследовать».",
         kind="tutorial",
         chain_order=1,
         objectives=[{"type": "expedition_start", "count": 1}],
@@ -169,7 +169,7 @@ QUESTS: list[dict[str, Any]] = [
     dict(
         code="tutorial_2",
         name="Среди звёзд",
-        description="Разберитесь с событиями экспедиции (go, choice/decline).",
+        description="Разберитесь с событиями экспедиции: выбирайте варианты на кнопках, «Исследовать» — двигаться дальше.",
         kind="tutorial",
         chain_order=2,
         objectives=[{"type": "event_resolved", "count": 2}],
@@ -178,7 +178,7 @@ QUESTS: list[dict[str, Any]] = [
     dict(
         code="tutorial_3",
         name="Первый контакт",
-        description="Победите в пошаговом бою (attack, при необходимости — retreat).",
+        description="Победите в пошаговом бою: кнопка «Атака», при необходимости — «Отступить».",
         kind="tutorial",
         chain_order=3,
         objectives=[{"type": "battle_won", "count": 1}],
@@ -187,7 +187,7 @@ QUESTS: list[dict[str, Any]] = [
     dict(
         code="story_1",
         name="Своя орбита",
-        description="Скрафтьте предмет в космопорту: recipes, craft.",
+        description="Создайте предмет в космопорту: Мастерская → «Крафт».",
         kind="story",
         chain_order=4,
         objectives=[{"type": "crafted", "count": 1}],
