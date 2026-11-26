@@ -518,6 +518,8 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
     expedition.arrived_at = datetime.now(UTC)
     ship = await get_ship(session, expedition.character_id)
     ship.status = "dock"
+    if character is not None:
+        character.hall = "main"  # после экспедиции игрок попадает в основной зал (ТЗ)
     await stores.add_outbox(
         session,
         character_id=expedition.character_id,

@@ -125,11 +125,29 @@ async def keyboard_for_character(
         # свободное плавание: [Исследовать][Залатать корабль] / [Инфо][В космопорт]
         return vk_keyboard([["go", "patch"], ["exp", "return"]], lang)
 
+    # космопорт: залы (ТЗ заказчика). Основной — точка входа после экспедиции.
+    hall = character.hall or "main"
+    if hall == "workshop":
+        return vk_keyboard(
+            [
+                ["mods", "recipes"],
+                ["inv", "ship"],
+                [("hall main", t("kb_hall_main", lang))],
+            ],
+            lang,
+        )
+    if hall == "hq":
+        return vk_keyboard(
+            [
+                ["quests", "shop"],
+                [("hall main", t("kb_hall_main", lang))],
+            ],
+            lang,
+        )
     return vk_keyboard(
         [
-            ["me", "inv", "ship"],
-            ["quests", "mods", "wallet"],
-            ["launch", "shop", "recipes"],
+            ["launch", "me"],
+            [("hall workshop", t("kb_workshop", lang)), ("hall hq", t("kb_hq", lang))],
         ],
         lang,
     )

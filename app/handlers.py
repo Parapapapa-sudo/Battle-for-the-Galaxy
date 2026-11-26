@@ -691,6 +691,23 @@ async def cmd_buy(session: AsyncSession, ctx: CommandContext, args: dict[str, An
     )
 
 
+HALL_TITLES = {"main": "hall_main", "workshop": "hall_workshop", "hq": "hall_hq"}
+
+
+async def cmd_hall(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Навигация по залам космопорта (только в порту)."""
+    character = await _load(session, ctx)
+    lang = character.lang
+    hall = str(args.get("rest", "")).strip() or "main"
+    if hall not in HALL_TITLES:
+        raise DomainError("bad_hall", t("bad_hall", lang))
+    if await expeditions.get_ongoing_expedition(session, character.id) is not None:
+        raise DomainError("expedition_ongoing", t("hall_in_expedition", lang))
+    character.hall = hall
+    await session.flush()
+    return CommandResult(message=t(HALL_TITLES[hall], lang))
+
+
 async def cmd_patch(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     delay = await expeditions.start_patch(session, character)
@@ -852,6 +869,7 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "expedition": cmd_exp,
     "launch": cmd_launch,
     "вылет": cmd_launch,
+    "hall": cmd_hall,
     "go": cmd_go,
     "дальше": cmd_go,
     "choice": cmd_choice,

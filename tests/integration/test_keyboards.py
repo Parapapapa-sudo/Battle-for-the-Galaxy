@@ -69,12 +69,31 @@ def _labels(kb: dict[str, Any]) -> list[str]:
 
 
 @requires_db
-async def test_port_menu_by_default(session, seeded):
+async def test_port_halls_navigation(session, seeded):
+    """Залы космопорта: основной (вход после экспедиции), мастерская, штаб."""
     character = await _character(session, seeded)
+
+    # основной зал — по умолчанию
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
-    labels = _labels(kb)
-    assert {"me", "inv", "ship", "launch", "quests", "wallet"} <= set(labels)
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows == [["Экспедиция", "О игроке"], ["Мастерская", "Штаб"]]
+
+    # мастерская
+    character.hall = "workshop"
+    await session.flush()
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows == [["Модули", "Крафт"], ["Инвентарь", "О корабле"], ["В основной зал"]]
+
+    # штаб
+    character.hall = "hq"
+    await session.flush()
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows == [["Задания", "Магазин"], ["В основной зал"]]
 
 
 @requires_db

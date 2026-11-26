@@ -111,6 +111,54 @@ async def test_new_user_gets_usage_hint(session, seeded, sessions):
 
 
 @requires_db
+async def test_hall_navigation_commands(session, seeded, sessions):
+    """Залы космопорта: hall workshop/hq/main меняет зал; в экспедиции — нельзя."""
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="start Ходок Тестов azimuth", idempotency_key=_key(),
+    )
+
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="hall workshop", idempotency_key=_key(),
+    )
+    assert "Мастерская" in r.message
+    account, _ = await characters.get_or_create_account(
+        session, platform="console", platform_user_id=user
+    )
+    character = await characters.get_active_character(session, account.id)
+    assert character is not None and character.hall == "workshop"
+
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="hall main", idempotency_key=_key(),
+    )
+    assert "Основной зал" in r.message
+    await session.refresh(character)
+    assert character.hall == "main"
+
+    # несуществующий зал
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="hall casino", idempotency_key=_key(),
+    )
+    assert "Неизвестный зал" in r.message
+
+    # в экспедиции залы недоступны
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="launch", idempotency_key=_key(),
+    )
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="hall hq", idempotency_key=_key(),
+    )
+    assert "только в порту" in r.message
+
+
+@requires_db
 async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
     """Регрессия: кнопки «1»/«2» с клавиатуры шлют боту цифру — роутер связывает
     её с вариантом активного события (иначе «Неизвестная команда: 1»)."""

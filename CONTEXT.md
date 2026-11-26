@@ -58,6 +58,11 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
 - **i18n**: `app/locale.py` (RU активен, EN готов). Команды НЕ переводятся.
   Кнопки VK: label локализован, команда — в payload (бот читает payload).
   Язык игрока: `characters.lang` (переключателя пока нет, дефолт ru).
+- **Залы космопорта** (`characters.hall`: main|workshop|hq, команда `hall <зал>`,
+  только в порту): основной [Экспедиция][О игроке]/[Мастерская][Штаб];
+  мастерская [Модули][Крафт]/[Инвентарь][О корабле]/[В основной зал];
+  штаб [Задания][Магазин]/[В основной зал]. Прибытие из экспедиции сбрасывает
+  зал в main. Кнопка wallet из меню убрана (команда wallet работает).
 - **Конфиг баланса** — всё в `config_params` (правится из админ-панели, hot reload).
   Админка: http://localhost:8000/admin-panel (веб-UI), ключ X-Admin-Key, роли
   admin/moderator/content_manager, аудит в `audit_log`.

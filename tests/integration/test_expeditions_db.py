@@ -201,13 +201,17 @@ async def test_voluntary_return_scenario(session, seeded):
     )
     assert timer is not None
 
-    # прибытие: worker-обработчик таймера
+    # прибытие: worker-обработчик таймера; игрок попадает в основной зал (ТЗ)
+    character.hall = "hq"
+    await session.flush()
     await expeditions.arrive_expedition(session, {"expedition_id": str(expedition.id)})
     await session.refresh(expedition)
     assert expedition.status == "completed"
     assert expedition.arrived_at is not None
     ship = await session.get(Ship, character.id)
     assert ship is not None and ship.status == "dock"
+    await session.refresh(character)
+    assert character.hall == "main"
 
     # повторная обработка того же таймера — идемпотентна (ТЗ)
     await expeditions.arrive_expedition(session, {"expedition_id": str(expedition.id)})
