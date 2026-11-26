@@ -27,6 +27,52 @@ def test_pick_random_from_pack(tmp_path: Path):
 
 
 @requires_db
+async def test_battle_outcome_carries_image_pack(session, seeded, sessions):
+    """Финал боя: победа → пак victory, раунды — без картинки."""
+    from app.bus import CommandBus
+    from app.models_game import Ship
+
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+
+    def send(text: str):
+        return route_text_command(
+            bus, sessions, platform="console", platform_user_id=user,
+            text=text, idempotency_key=f"k-{uuid.uuid4().hex[:8]}",
+        )
+
+    await send("start Боец Тестов azimuth")
+    await send("launch")
+    account, _ = await characters.get_or_create_account(
+        session, platform="console", platform_user_id=user
+    )
+    character = await characters.get_active_character(session, account.id)
+    assert character is not None
+    expedition = await expeditions.get_ongoing_expedition(session, character.id)
+    assert expedition is not None
+
+    # буст корпуса — победа гарантирована
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.base_max_hull = 2000
+    ship.current_hull = 2000
+    await session.flush()
+    from app import battles
+
+    await battles.start_battle(
+        session, character, enemy_code="pirate_scout", expedition=expedition
+    )
+
+    pack = None
+    for _ in range(60):
+        r = await send("attack")
+        if r.image_pack is not None:
+            pack = r.image_pack
+            break
+    assert pack == "victory"
+
+
+@requires_db
 async def test_attachment_cache_by_mtime(session, seeded, tmp_path: Path):
     folder = _make_pack(tmp_path, "travel", ["a.jpg"])
     path = folder / "a.jpg"

@@ -355,10 +355,22 @@ async def _battle_message(
     return await battles.describe_round_result(session, battle, lang=lang)
 
 
+def _battle_pack(battle: Battle) -> str | None:
+    """Пак картинки финала боя: победа/поражение (раунды — без картинки)."""
+    if battle.status == "won":
+        return "victory"
+    if battle.status == "lost":
+        return "defeat"
+    return None
+
+
 async def cmd_attack(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     battle = await battles.player_attack(session, character)
-    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
+    return CommandResult(
+        message=await _battle_message(session, battle, lang=character.lang),
+        image_pack=_battle_pack(battle),
+    )
 
 
 async def cmd_use(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -367,13 +379,19 @@ async def cmd_use(session: AsyncSession, ctx: CommandContext, args: dict[str, An
     if not code:
         raise DomainError("no_item", t("craft_bad", character.lang))
     battle = await battles.player_use_item(session, character, code)
-    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
+    return CommandResult(
+        message=await _battle_message(session, battle, lang=character.lang),
+        image_pack=_battle_pack(battle),
+    )
 
 
 async def cmd_retreat(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     battle = await battles.player_retreat(session, character)
-    return CommandResult(message=await _battle_message(session, battle, lang=character.lang))
+    return CommandResult(
+        message=await _battle_message(session, battle, lang=character.lang),
+        image_pack=_battle_pack(battle),
+    )
 
 
 async def cmd_battle(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:

@@ -91,7 +91,7 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
 - **Картинки к сообщениям** (`app/images.py` + `adapters/vk/images.py`): паки —
   папки `assets/images/<пак>/` (jpg/jpeg/png/gif, пополняются копированием
   файлов). Паки: travel (путь/вылет/«Инфо» в пути), battle (вступление в бой),
-  port_main / port_workshop / port_hq (залы, прибытие). CommandResult.image_pack
+  victory / defeat (финал боя), port_main / port_workshop / port_hq (залы, прибытие). CommandResult.image_pack
   — для прямых ответов; outbox — payload {"image_pack": ...} (прибытие, бой из
   автособытия). VK-загрузка однократная: attachment кэшируется в config_params
   `images.cache` (инвалидация по mtime файла). Пустой пак/сбой загрузки — ответ

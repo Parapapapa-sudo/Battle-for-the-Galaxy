@@ -28,8 +28,11 @@ async def _ability_handler(
     character = await load_character(session, ctx.character_id)
     battle = await battles.player_ability(session, character, str(args.get("cmd", "")))
     if battle.status in ("won", "lost"):
+        from app.handlers import _battle_pack
+
         return CommandResult(
-            message=await battles.describe_battle_outcome(session, battle, character.lang)
+            message=await battles.describe_battle_outcome(session, battle, character.lang),
+            image_pack=_battle_pack(battle),
         )
     return CommandResult(
         message=await battles.describe_round_result(session, battle, lang=character.lang)
