@@ -161,6 +161,17 @@ async def keyboard_for_account(session: AsyncSession, account: Any) -> dict[str,
 
     onboarding = account.onboarding or {}
     step = onboarding.get("step")
+    if step == "preview":
+        # просмотр фракции: подтверждение выбора или возврат к списку
+        faction = await characters.get_faction_by_code(session, str(onboarding.get("preview", "")))
+        if faction is not None:
+            return vk_keyboard(
+                [
+                    [(f"pick {faction.code}", t("kb_choose_faction"))],
+                    [("intro2", t("kb_back_factions"))],
+                ]
+            )
+        return vk_keyboard([["intro2"]])
     if step in ("intro2", "join"):
         factions = await characters.list_factions(session)
         rows = [

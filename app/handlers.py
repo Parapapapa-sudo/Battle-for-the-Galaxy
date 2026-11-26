@@ -54,7 +54,25 @@ async def cmd_intro2(session: AsyncSession, ctx: CommandContext, args: dict[str,
 
 
 async def cmd_join(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
-    """Выбор фракции кнопкой: история фракции + запрос имени капитана текстом."""
+    """Просмотр фракции (ещё НЕ выбор): полная история + кнопка подтверждения.
+
+    Игрок не должен выбирать вслепую: join показывает описание, выбор
+    фиксируется только явным «pick».
+    """
+    account = await _account(session, ctx)
+    code = str(args.get("rest", "")).strip()
+    faction = await characters.get_faction_by_code(session, code)
+    if faction is None:
+        raise DomainError("unknown_faction", t("start_no_factions"))
+    account.onboarding = {"step": "preview", "preview": faction.code}
+    await session.flush()
+    return CommandResult(
+        message=f"{faction.name}\n\n{faction.description}\n\n" + t("join_preview_hint")
+    )
+
+
+async def cmd_pick(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Подтверждение фракции: запрос имени капитана (следующее сообщение — имя)."""
     account = await _account(session, ctx)
     code = str(args.get("rest", "")).strip()
     faction = await characters.get_faction_by_code(session, code)
@@ -65,7 +83,8 @@ async def cmd_join(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     low = int(await stores.get_param(session, "names.min_length", 3))
     high = int(await stores.get_param(session, "names.max_length", 24))
     return CommandResult(
-        message=f"{faction.name}\n\n{faction.description}\n\n"
+        message=t("pick_confirmed", faction=faction.name)
+        + "\n"
         + t("join_prompt_name", low=low, high=high)
     )
 
@@ -914,6 +933,7 @@ ACCOUNT_COMMANDS: dict[str, Any] = {
     "intro": cmd_intro,
     "intro2": cmd_intro2,
     "join": cmd_join,
+    "pick": cmd_pick,
 }
 
 CHARACTER_COMMANDS: dict[str, Any] = {

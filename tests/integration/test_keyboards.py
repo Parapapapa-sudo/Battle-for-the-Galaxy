@@ -69,6 +69,35 @@ def _labels(kb: dict[str, Any]) -> list[str]:
 
 
 @requires_db
+async def test_onboarding_keyboards(session, seeded):
+    """Клавиатуры шагов онбординга: Начать → Продолжить → фракции → предпросмотр."""
+    from app.keyboards import keyboard_for_account
+    from app.models_game import Account
+
+    account = Account()
+    session.add(account)
+    await session.flush()
+
+    kb = await keyboard_for_account(session, account)
+    assert _labels(kb) == ["Начать"]
+
+    account.onboarding = {"step": "intro"}
+    kb = await keyboard_for_account(session, account)
+    assert _labels(kb) == ["Продолжить"]
+
+    account.onboarding = {"step": "intro2"}
+    kb = await keyboard_for_account(session, account)
+    labels = _labels(kb)
+    assert "Вольная Лига" in labels and "Синод Эонов" in labels
+    payloads = [b["action"]["payload"] for row in kb["buttons"] for b in row]
+    assert any("join lumen" in p for p in payloads)
+
+    account.onboarding = {"step": "preview", "preview": "lumen"}
+    kb = await keyboard_for_account(session, account)
+    assert _labels(kb) == ["Выбрать эту фракцию", "◀ К списку фракций"]
+
+
+@requires_db
 async def test_port_halls_navigation(session, seeded):
     """Залы космопорта: основной (вход после экспедиции), мастерская, штаб."""
     character = await _character(session, seeded)

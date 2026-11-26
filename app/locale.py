@@ -47,10 +47,23 @@ RU: dict[str, str] = {
     "join_prompt_name": (
         "Напиши имя капитана одним сообщением (от {low} до {high} символов) — и в бой!"
     ),
+    "join_preview_hint": (
+        "Если решишь лететь под этим знаменем — нажми «Выбрать эту фракцию». "
+        "Хочешь сравнить — вернись к списку."
+    ),
+    "pick_confirmed": "Фракция выбрана: {faction}.",
+    "kb_choose_faction": "Выбрать эту фракцию",
+    "kb_back_factions": "◀ К списку фракций",
     "start_usage": "Создание персонажа: start <имя> <код_фракции>.\nДоступные фракции: {codes}",
     "start_no_factions": "нет (контент не засеян)",
     "start_choose": "Выберите фракцию для «{name}»:\n{factions}",
-    "start_created": "Персонаж «{name}» создан. Фракция: {faction}.\nОбучение начинается с первой экспедиции.\nКоманды: me — профиль, inv — инвентарь, ship — корабль.",
+    "start_created": (
+        "Персонаж «{name}» создан. Фракция: {faction}.\n\n"
+        "Ты в космопорту. Первый шаг — нажми «Экспедиция», чтобы отправиться "
+        "в первый вылет: задания (зал «Штаб» → «Задания») будут подсказывать, "
+        "что делать дальше.\n"
+        "Если пропали кнопки — напиши ui."
+    ),
     # profile / inventory / ship
     "profile": "{name} — {faction}\nРепутация: {rep}\nОпыт (пул): {xp}",
     "inv_bad_kind": "Раздел: ship | warehouse | waiting",
@@ -254,10 +267,22 @@ EN: dict[str, str] = {
     "join_prompt_name": (
         "Send your captain's name as a single message ({low}–{high} characters) — and to battle!"
     ),
+    "join_preview_hint": (
+        "If you decide to fly under this banner — press «Choose this faction». "
+        "Want to compare — go back to the list."
+    ),
+    "pick_confirmed": "Faction chosen: {faction}.",
+    "kb_choose_faction": "Choose this faction",
+    "kb_back_factions": "◀ Back to factions",
     "start_usage": "Character creation: start <name> <faction_code>.\nAvailable factions: {codes}",
     "start_no_factions": "none (content not seeded)",
     "start_choose": "Choose a faction for «{name}»:\n{factions}",
-    "start_created": "Character «{name}» created. Faction: {faction}.\nTraining starts with the first expedition.\nCommands: me — profile, inv — inventory, ship — ship.",
+    "start_created": (
+        "Character «{name}» created. Faction: {faction}.\n\n"
+        "You are at the spaceport. First step — press «Expedition» to set off "
+        "on your first flight: quests (HQ hall → «Quests») will guide you further.\n"
+        "If buttons disappear — type ui."
+    ),
     "profile": "{name} — {faction}\nReputation: {rep}\nXP pool: {xp}",
     "inv_bad_kind": "Section: ship | warehouse | waiting",
     "inv_empty": "Inventory is empty.",

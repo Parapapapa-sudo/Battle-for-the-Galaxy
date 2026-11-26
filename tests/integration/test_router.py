@@ -135,8 +135,15 @@ async def test_onboarding_full_flow(session, seeded, sessions):
     r = await send("intro2")  # кнопка «Продолжить»
     assert "Выбери фракцию" in r.message and "Конкордат" in r.message
 
-    r = await send("join lumen")  # выбор фракции кнопкой
-    assert "Синод Эонов" in r.message and "имя капитана" in r.message
+    r = await send("join lumen")  # ПРОСМОТР фракции — выбор ещё не зафиксирован
+    assert "Синод Эонов" in r.message and "Выбрать эту фракцию" in r.message
+    account, _ = await characters.get_or_create_account(
+        session, platform="console", platform_user_id=user
+    )
+    assert "faction" not in (account.onboarding or {})
+
+    r = await send("pick lumen")  # подтверждение выбора
+    assert "Фракция выбрана" in r.message and "имя капитана" in r.message
 
     # короткое имя не проходит валидацию — состояние выбора сохраняется
     r = await send("ab")
@@ -144,11 +151,10 @@ async def test_onboarding_full_flow(session, seeded, sessions):
 
     r = await send("Капитан Смит")  # имя свободным текстом
     assert "создан" in r.message and "Синод Эонов" in r.message
+    assert "Экспедиция" in r.message  # подсказка первого шага
 
     # персонаж создан, онбординг очищен, фракция верная
-    account, _ = await characters.get_or_create_account(
-        session, platform="console", platform_user_id=user
-    )
+    await session.refresh(account)
     character = await characters.get_active_character(session, account.id)
     assert character is not None and character.name == "Капитан Смит"
     assert account.onboarding == {}
