@@ -95,6 +95,15 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
   {interval_sec} (0 = выкл, минимум 30с), выполняет worker (`_health_tick`).
   Результаты и расписание — в config_params (`tools.health_last`,
   `tools.health_interval_sec`), UI показывает время последней проверки МСК.
+- **Редактор контента** (вкладка «Контент», роль admin+content_manager):
+  события/задания/рецепты — список, создание, правка, удаление
+  (GET/POST /admin/content[/{kind}], PUT/DELETE /admin/content/{kind}/{code}).
+  Валидация per-kind в `admin._validate_content` (interactive → script.choices,
+  automatic → script.variants; рецепт → result_item_code существует).
+  Удаление: жёсткое, если нет ссылок; если контент в истории игроков
+  (ExpeditionEvent RESTRICT / CharacterQuest) — status='archived' (из игры
+  исчезает, история цела). JSON-поля (script/objectives/rewards/materials)
+  редактируются как JSON-текст в форме.
 
 ## Ключевые правила ТЗ (не сломать!)
 

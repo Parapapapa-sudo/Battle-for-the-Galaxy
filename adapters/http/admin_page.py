@@ -105,6 +105,37 @@ section.active { display: block; }
       </select>
     </div>
     <button onclick="setContent()">Применить статус</button>
+  </div>
+  <div class="card"><h2>Изменить или удалить контент</h2>
+    <div class="formrow">
+      <select id="ce-kind" onchange="contentEditSelect()" title="Тип контента">
+        <option value="event">Событие</option>
+        <option value="quest">Задание</option>
+        <option value="recipe">Рецепт</option>
+      </select>
+      <select id="ce-code" onchange="contentEditFill()" title="Контент"></select>
+    </div>
+    <div id="ce-form"></div>
+    <div class="formrow" id="ce-buttons" style="display:none">
+      <button class="ghost" onclick="contentCancel('edit')">Отменить изменения</button>
+      <button class="ghost" onclick="contentDelete()">Удалить контент</button>
+      <button onclick="contentSave('edit')">Сохранить изменения</button>
+    </div>
+  </div>
+  <div class="card"><h2>Добавить контент</h2>
+    <div class="formrow"><button class="ghost" onclick="contentAddStart()">Добавить</button></div>
+    <div class="formrow" id="ca-kind-row" style="display:none">
+      <select id="ca-kind" onchange="contentAddForm()" title="Тип контента">
+        <option value="event">Событие</option>
+        <option value="quest">Задание</option>
+        <option value="recipe">Рецепт</option>
+      </select>
+    </div>
+    <div id="ca-form"></div>
+    <div class="formrow" id="ca-buttons" style="display:none">
+      <button class="ghost" onclick="contentCancel('add')">Отменить изменения</button>
+      <button onclick="contentSave('add')">Сохранить изменения</button>
+    </div>
   </div></section>
 
   <section data-tab="items">
@@ -243,6 +274,7 @@ async function saveKey() {
     out("Ключ принят: " + me.login + " (" + me.role + ")", true);
     loadEffects();
     if (me.role === "admin") { loadItems(); loadHealth(); }
+    if (me.role === "admin" || me.role === "content_manager") loadContentList();
   } catch (e) { ROLE = null; $("role").textContent = "ключ не принят"; renderTabs(); }
 }
 async function loadEffects() {
@@ -291,6 +323,153 @@ async function applyEffect() {
 }
 async function setContent() {
   out(await api("POST", "/admin/content/" + $("ct-table").value + "/" + $("ct-code").value.trim() + "/status", { status: $("ct-status").value }), true);
+}
+// --- редактор контента: события / задания / рецепты ------------------------------
+const CONTENT_FIELDS = {
+  event: [
+    ["code", "Код (a-z, 0-9, _)", "text"],
+    ["name", "Название", "text"],
+    ["description", "Описание", "textarea"],
+    ["kind", "Тип события", "select", ["automatic", "interactive"]],
+    ["fuel_cost", "Стоимость топлива", "number"],
+    ["danger_min", "Опасность: от (1-10)", "number"],
+    ["danger_max", "Опасность: до (1-10)", "number"],
+    ["can_refuse", "Можно отказаться", "checkbox"],
+    ["is_unique_per_expedition", "Уникальное за экспедицию", "checkbox"],
+    ["status", "Статус", "select", ["published", "draft", "archived"]],
+    ["script", 'Сценарий JSON: {"choices": [...]} для interactive, {"variants": [...]} для automatic', "json"],
+  ],
+  quest: [
+    ["code", "Код (a-z, 0-9, _)", "text"],
+    ["name", "Название", "text"],
+    ["description", "Описание", "textarea"],
+    ["kind", "Тип задания", "select", ["tutorial", "story"]],
+    ["chain_order", "Порядок в цепочке", "number"],
+    ["objectives", 'Цели JSON: [{"type": "event_resolved", "count": 2}]', "json"],
+    ["rewards", 'Награды JSON: {"quant": 100, "xp": 10, "items": [{"code": "...", "qty": 1}]}', "json"],
+    ["status", "Статус", "select", ["published", "draft", "archived"]],
+  ],
+  recipe: [
+    ["code", "Код (a-z, 0-9, _)", "text"],
+    ["name", "Название", "text"],
+    ["result_item_code", "Код предмета результата", "text"],
+    ["result_qty", "Количество результата", "number"],
+    ["materials", 'Материалы JSON: [{"code": "scrap_metal", "qty": 3}]', "json"],
+    ["duration_sec", "Длительность крафта, сек", "number"],
+    ["cancel_return_pct", "Возврат материалов при отмене, %", "number"],
+    ["status", "Статус", "select", ["published", "draft", "archived"]],
+  ],
+};
+const CONTENT_DEFAULTS = {
+  event: { kind: "automatic", fuel_cost: 1, danger_min: 1, danger_max: 1, can_refuse: true, is_unique_per_expedition: false, status: "published", script: { variants: [{ weight: 1, outcome: { message: "..." } }] } },
+  quest: { kind: "tutorial", chain_order: 0, objectives: [{ type: "event_resolved", count: 1 }], rewards: { quant: 100 }, status: "published" },
+  recipe: { result_qty: 1, materials: [{ code: "scrap_metal", qty: 1 }], duration_sec: 60, cancel_return_pct: 50, status: "published" },
+};
+let CONTENT = null;
+async function loadContentList() {
+  try {
+    CONTENT = await api("GET", "/admin/content");
+    contentEditSelect();
+  } catch (e) {}
+}
+function contentEditSelect() {
+  const kind = $("ce-kind").value;
+  const list = CONTENT ? (CONTENT[kind + "s"] || []) : [];
+  $("ce-code").innerHTML = list.map(i => '<option value="' + i.code + '">' + i.name + " (" + i.code + ")</option>").join("");
+  contentEditFill();
+}
+function contentEditFill() {
+  const kind = $("ce-kind").value;
+  const item = CONTENT ? (CONTENT[kind + "s"] || []).find(x => x.code === $("ce-code").value) : null;
+  if (!item) { $("ce-form").innerHTML = '<div class="note">Контента этого типа нет.</div>'; $("ce-buttons").style.display = "none"; return; }
+  renderContentForm("ce-form", "ce", kind, item);
+  $("ce-buttons").style.display = "flex";
+}
+function contentAddStart() {
+  $("ca-kind-row").style.display = "flex";
+  contentAddForm();
+}
+function contentAddForm() {
+  const kind = $("ca-kind").value;
+  renderContentForm("ca-form", "ca", kind, CONTENT_DEFAULTS[kind]);
+  $("ca-buttons").style.display = "flex";
+}
+function renderContentForm(containerId, prefix, kind, item) {
+  const html = CONTENT_FIELDS[kind].map(([key, label, type, options]) => {
+    const id = prefix + "-" + key;
+    const value = item[key];
+    if (type === "checkbox") {
+      return '<label style="display:block;margin:6px 0"><input type="checkbox" id="' + id + '"' + (value ? " checked" : "") + "> " + label + "</label>";
+    }
+    if (type === "select") {
+      return '<div class="formrow"><select id="' + id + '" title="' + label + '">' +
+        options.map(o => '<option value="' + o + '"' + (o === value ? " selected" : "") + ">" + o + "</option>").join("") +
+        '</select><span class="note" style="flex:2">' + label + "</span></div>";
+    }
+    if (type === "textarea") {
+      return '<div class="formrow"><textarea id="' + id + '" rows="2" placeholder="' + label + '">' + (value || "") + "</textarea></div>";
+    }
+    if (type === "json") {
+      const text = value === undefined ? "" : JSON.stringify(value);
+      return '<div class="formrow"><textarea id="' + id + '" rows="3" class="mono" placeholder="' + label.replace(/"/g, "&quot;") + '">' + text + "</textarea></div>";
+    }
+    const val = value === undefined || value === null ? "" : value;
+    return '<div class="formrow"><input id="' + id + '" type="' + (type === "number" ? "number" : "text") + '" value="' + val + '" placeholder="' + label + '" title="' + label + '"' + (key === "code" && prefix === "ce" ? " disabled" : "") + "></div>";
+  }).join("");
+  $(containerId).innerHTML = html;
+}
+function collectContentForm(prefix, kind) {
+  const data = {};
+  for (const [key, label, type] of CONTENT_FIELDS[kind]) {
+    const el = $(prefix + "-" + key);
+    if (type === "checkbox") { data[key] = el.checked; continue; }
+    if (type === "number") {
+      if (el.value.trim() === "") throw new Error("поле «" + label + "» не заполнено");
+      data[key] = Number(el.value);
+      continue;
+    }
+    if (type === "json") {
+      const raw = el.value.trim();
+      if (!raw) { data[key] = CONTENT_FIELDS[kind].find(f => f[0] === key)[2] === "json" ? (Array.isArray(CONTENT_DEFAULTS[kind][key]) ? [] : {}) : {}; continue; }
+      try { data[key] = JSON.parse(raw); } catch (e) { throw new Error("поле «" + label + "»: некорректный JSON"); }
+      continue;
+    }
+    data[key] = el.value.trim();
+  }
+  return data;
+}
+async function contentSave(mode) {
+  const kind = $(mode === "edit" ? "ce-kind" : "ca-kind").value;
+  let body;
+  try { body = collectContentForm(mode === "edit" ? "ce" : "ca", kind); }
+  catch (e) { out("Ошибка при сохранении. Некорректные значения полей. " + e.message, false); return; }
+  try {
+    if (mode === "edit") await api("PUT", "/admin/content/" + kind + "/" + encodeURIComponent(body.code), body, true);
+    else await api("POST", "/admin/content/" + kind, body, true);
+    out("Контент сохранен", true);
+    await loadContentList();
+    if (mode === "edit") { $("ce-code").value = body.code; contentEditFill(); }
+  } catch (e) { out("Ошибка при сохранении. Некорректные значения полей. " + e.message, false); }
+}
+async function contentDelete() {
+  const kind = $("ce-kind").value, code = $("ce-code").value;
+  if (!code) { out("Контент не выбран", false); return; }
+  try {
+    await api("DELETE", "/admin/content/" + kind + "/" + encodeURIComponent(code), null, true);
+    out("Контент удален", true);
+    await loadContentList();
+  } catch (e) { out("Ошибка: " + e.message, false); }
+}
+function contentCancel(mode) {
+  if (mode === "edit") {
+    $("ce-form").innerHTML = "";
+    $("ce-buttons").style.display = "none";
+  } else {
+    $("ca-form").innerHTML = "";
+    $("ca-buttons").style.display = "none";
+    $("ca-kind-row").style.display = "none";
+  }
+  out("Изменения отменены", true);
 }
 // --- предметы -----------------------------------------------------------------
 let ITEM_MODE = null, ITEMS = [];

@@ -116,6 +116,48 @@ async def character_history(
             _guard(exc)
 
 
+@router.get("/content")
+async def content_list(adm: AdminUser = Depends(current_admin)) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.list_content(session, adm)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.post("/content/{kind}")
+async def content_create(
+    kind: str, body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.create_content(session, adm, kind, body)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.put("/content/{kind}/{code}")
+async def content_update(
+    kind: str, code: str, body: dict[str, Any], adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.update_content(session, adm, kind, code, body)
+        except DomainError as exc:
+            _guard(exc)
+
+
+@router.delete("/content/{kind}/{code}")
+async def content_delete(
+    kind: str, code: str, adm: AdminUser = Depends(current_admin)
+) -> dict[str, Any]:
+    async with session_factory() as session, transactional(session):
+        try:
+            return await admin.delete_content(session, adm, kind, code)
+        except DomainError as exc:
+            _guard(exc)
+
+
 @router.post("/content/{table}/{code}/status")
 async def set_content_status(
     table: str, code: str, body: dict[str, Any],

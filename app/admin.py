@@ -415,6 +415,265 @@ async def update_item(
     return _item_to_dict(item)
 
 
+# --- контент: редактор событий/заданий/рецептов (админ + контент-менеджер) -------------
+
+CONTENT_KINDS: dict[str, Any] = {
+    "event": EventTemplate,
+    "quest": QuestTemplate,
+    "recipe": RecipeTemplate,
+}
+_CONTENT_STATUSES = ("draft", "published", "archived")
+_QUEST_KINDS = ("tutorial", "story")
+_EVENT_KINDS = ("automatic", "interactive")
+
+
+def _content_to_dict(kind: str, row: Any) -> dict[str, Any]:
+    base = {"code": row.code, "name": row.name, "status": row.status}
+    if kind == "event":
+        return base | {
+            "description": row.description,
+            "kind": row.kind,
+            "fuel_cost": row.fuel_cost,
+            "danger_min": row.danger_min,
+            "danger_max": row.danger_max,
+            "can_refuse": row.can_refuse,
+            "is_unique_per_expedition": row.is_unique_per_expedition,
+            "script": row.script or {},
+            "conditions": row.conditions or {},
+        }
+    if kind == "quest":
+        return base | {
+            "description": row.description,
+            "kind": row.kind,
+            "chain_order": row.chain_order,
+            "objectives": row.objectives or [],
+            "rewards": row.rewards or {},
+        }
+    return base | {
+        "result_item_code": row.result_item_code,
+        "result_qty": row.result_qty,
+        "materials": row.materials or [],
+        "duration_sec": row.duration_sec,
+        "cancel_return_pct": row.cancel_return_pct,
+        "requirements": row.requirements or {},
+    }
+
+
+async def list_content(session: AsyncSession, admin: AdminUser) -> dict[str, Any]:
+    """Весь контент трёх типов — для редакторов админ-панели."""
+    require_role(admin, "admin", "content_manager")
+    result: dict[str, Any] = {}
+    for kind, model in CONTENT_KINDS.items():
+        rows = (await session.scalars(sa.select(model).order_by(model.code))).all()
+        result[kind + "s"] = [_content_to_dict(kind, row) for row in rows]
+    return result
+
+
+def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[str, Any]:
+    import re
+
+    errors: list[str] = []
+    code = str(data.get("code", "")).strip().lower()
+    if create and not re.fullmatch(r"[a-z0-9_]{2,64}", code):
+        errors.append("код: 2–64 символа a-z, 0-9, _")
+    name = str(data.get("name", "")).strip()
+    if not name:
+        errors.append("название обязательно")
+    status = str(data.get("status", "published")).strip()
+    if status not in _CONTENT_STATUSES:
+        errors.append(f"статус: {'|'.join(_CONTENT_STATUSES)}")
+
+    def _int(field: str, default: int, lo: int, hi: int) -> int:
+        try:
+            value = int(data.get(field, default))
+        except (TypeError, ValueError):
+            errors.append(f"{field}: целое число")
+            return default
+        if not lo <= value <= hi:
+            errors.append(f"{field}: от {lo} до {hi}")
+        return value
+
+    def _json(field: str, default: Any, expected: type) -> Any:
+        value = data.get(field, default)
+        if not isinstance(value, expected):
+            errors.append(f"{field}: {'список' if expected is list else 'объект'} JSON")
+            return default
+        return value
+
+    fields: dict[str, Any] = {"code": code, "name": name, "status": status}
+    if kind == "event":
+        ekind = str(data.get("kind", "")).strip()
+        if ekind not in _EVENT_KINDS:
+            errors.append(f"тип события: {'|'.join(_EVENT_KINDS)}")
+        danger_min = _int("danger_min", 1, 1, 10)
+        danger_max = _int("danger_max", 1, 1, 10)
+        if danger_max < danger_min:
+            errors.append("опасность «до» меньше «от»")
+        script = _json("script", {}, dict)
+        if ekind == "interactive" and not script.get("choices"):
+            errors.append("для interactive нужен script.choices (непустой список)")
+        if ekind == "automatic" and not script.get("variants"):
+            errors.append("для automatic нужен script.variants (непустой список)")
+        fields |= {
+            "description": str(data.get("description", "")).strip(),
+            "kind": ekind,
+            "fuel_cost": _int("fuel_cost", 1, 0, 1000),
+            "danger_min": danger_min,
+            "danger_max": danger_max,
+            "can_refuse": bool(data.get("can_refuse", True)),
+            "is_unique_per_expedition": bool(data.get("is_unique_per_expedition", False)),
+            "script": script,
+            "conditions": _json("conditions", {}, dict),
+        }
+    elif kind == "quest":
+        qkind = str(data.get("kind", "tutorial")).strip()
+        if qkind not in _QUEST_KINDS:
+            errors.append(f"тип задания: {'|'.join(_QUEST_KINDS)}")
+        objectives = _json("objectives", [], list)
+        if not objectives:
+            errors.append("нужна хотя бы одна цель (objectives)")
+        fields |= {
+            "description": str(data.get("description", "")).strip(),
+            "kind": qkind,
+            "chain_order": _int("chain_order", 0, 0, 1000),
+            "objectives": objectives,
+            "rewards": _json("rewards", {}, dict),
+        }
+    else:  # recipe
+        result_code = str(data.get("result_item_code", "")).strip()
+        if not result_code:
+            errors.append("код предмета результата обязателен")
+        materials = _json("materials", [], list)
+        for mat in materials:
+            if not isinstance(mat, dict) or not mat.get("code") or int(mat.get("qty", 0)) < 1:
+                errors.append('материалы: список вида [{"code": "...", "qty": N}]')
+                break
+        fields |= {
+            "result_item_code": result_code,
+            "result_qty": _int("result_qty", 1, 1, 1000),
+            "materials": materials,
+            "duration_sec": _int("duration_sec", 60, 0, 604800),
+            "cancel_return_pct": _int("cancel_return_pct", 50, 0, 100),
+            "requirements": _json("requirements", {}, dict),
+        }
+    if errors:
+        raise DomainError(
+            "bad_content", "Ошибка при сохранении. Некорректные значения полей: " + "; ".join(errors)
+        )
+    return fields
+
+
+async def _validate_recipe_result(session: AsyncSession, fields: dict[str, Any]) -> None:
+    """Предмет результата рецепта должен существовать."""
+    exists = await session.scalar(
+        sa.select(ItemTemplate.id).where(ItemTemplate.code == fields["result_item_code"])
+    )
+    if exists is None:
+        raise DomainError(
+            "bad_content",
+            "Ошибка при сохранении. Некорректные значения полей: "
+            f"предмет результата «{fields['result_item_code']}» не существует",
+        )
+
+
+async def create_content(
+    session: AsyncSession, admin: AdminUser, kind: str, data: dict[str, Any]
+) -> dict[str, Any]:
+    require_role(admin, "admin", "content_manager")
+    model = CONTENT_KINDS.get(kind)
+    if model is None:
+        raise DomainError("bad_kind", f"Тип контента: {'|'.join(CONTENT_KINDS)}.")
+    fields = _validate_content(kind, data, create=True)
+    if kind == "recipe":
+        await _validate_recipe_result(session, fields)
+    if await session.scalar(sa.select(model).where(model.code == fields["code"])) is not None:
+        raise DomainError(
+            "bad_content",
+            f"Ошибка при сохранении. Некорректные значения полей: «{fields['code']}» уже существует",
+        )
+    row = model(**fields)
+    session.add(row)
+    await audit(
+        session, admin, "create_content", target_type=kind, target_id=fields["code"],
+        after={"name": fields["name"]},
+    )
+    await session.flush()
+    return _content_to_dict(kind, row)
+
+
+async def update_content(
+    session: AsyncSession, admin: AdminUser, kind: str, code: str, data: dict[str, Any]
+) -> dict[str, Any]:
+    require_role(admin, "admin", "content_manager")
+    model = CONTENT_KINDS.get(kind)
+    if model is None:
+        raise DomainError("bad_kind", f"Тип контента: {'|'.join(CONTENT_KINDS)}.")
+    row = await session.scalar(sa.select(model).where(model.code == code))
+    if row is None:
+        raise DomainError("not_found", f"Контент «{code}» не найден.")
+    fields = _validate_content(kind, {**data, "code": code}, create=False)
+    if kind == "recipe":
+        await _validate_recipe_result(session, fields)
+    before = _content_to_dict(kind, row)
+    for key, value in fields.items():
+        if key != "code":
+            setattr(row, key, value)
+    await audit(
+        session, admin, "update_content", target_type=kind, target_id=code,
+        before=before, after=_content_to_dict(kind, row),
+    )
+    await session.flush()
+    return _content_to_dict(kind, row)
+
+
+async def delete_content(
+    session: AsyncSession, admin: AdminUser, kind: str, code: str
+) -> dict[str, Any]:
+    """Удаление: жёсткое, если контент нигде не используется; иначе — архив.
+
+    События/задания обычно связаны с историей игроков (FK) — тогда status
+    'archived': из игры контент исчезает, история сохраняется.
+    """
+    require_role(admin, "admin", "content_manager")
+    model = CONTENT_KINDS.get(kind)
+    if model is None:
+        raise DomainError("bad_kind", f"Тип контента: {'|'.join(CONTENT_KINDS)}.")
+    row = await session.scalar(sa.select(model).where(model.code == code))
+    if row is None:
+        raise DomainError("not_found", f"Контент «{code}» не найден.")
+    before = _content_to_dict(kind, row)
+    mode = "hard"
+    if kind == "quest":
+        # CharacterQuest → CASCADE: жёсткое удаление стёрло бы прогресс игроков
+        used = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(CharacterQuest)
+                .where(CharacterQuest.quest_id == row.id)
+            )
+            or 0
+        )
+        if used:
+            mode = "archived"
+    if mode == "hard":
+        try:
+            async with session.begin_nested():
+                await session.delete(row)
+                await session.flush()
+        except sa.exc.IntegrityError:  # ExpeditionEvent → RESTRICT (история игроков)
+            mode = "archived"
+            row.status = "archived"
+            await session.flush()
+    else:
+        row.status = "archived"
+        await session.flush()
+    await audit(
+        session, admin, "delete_content", target_type=kind, target_id=code,
+        before=before, after={"mode": mode},
+    )
+    return {"code": code, "mode": mode}
+
+
 # --- аналитика (MVP) -------------------------------------------------------------------
 
 # МСК без перехода на летнее время (UTC+3) — для журнала аудита в админ-панели
@@ -430,6 +689,11 @@ _AUDIT_ACTION_LABELS = {
     "create_admin": "создал администратора",
     "create_item": "создал предмет",
     "update_item": "изменил предмет",
+    "create_content": "создал контент",
+    "update_content": "изменил контент",
+    "delete_content": "удалил контент",
+    "health_check": "проверил работоспособность",
+    "set_health_schedule": "настроил расписание проверок",
 }
 
 

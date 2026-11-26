@@ -222,6 +222,84 @@ async def test_moderator_cannot_create_effects(session, seeded):
 
 
 @requires_db
+async def test_content_editor_crud(session, seeded):
+    """Редактор контента: создание/правка/удаление событий, заданий, рецептов."""
+    owner, mod, cm = await _admins(session)
+
+    # список: контент-менеджеру можно, модератору — нет
+    catalog = await admin.list_content(session, cm)
+    assert catalog["events"] and catalog["quests"] and catalog["recipes"]
+    with pytest.raises(DomainError) as exc_info:
+        await admin.list_content(session, mod)
+    assert exc_info.value.code == "forbidden"
+
+    # создание события (контент-менеджер — его зона)
+    event = await admin.create_content(session, cm, "event", {
+        "code": "test_event", "name": "Тестовое событие", "kind": "automatic",
+        "fuel_cost": 2, "danger_min": 2, "danger_max": 4,
+        "script": {"variants": [{"weight": 1, "outcome": {"message": "ок"}}]},
+    })
+    assert event["code"] == "test_event" and event["status"] == "published"
+
+    # создание рецепта + валидация предмета результата
+    recipe = await admin.create_content(session, owner, "recipe", {
+        "code": "test_recipe", "name": "Тест-рецепт", "result_item_code": "scrap_metal",
+        "materials": [{"code": "nano_patch", "qty": 1}], "duration_sec": 30,
+    })
+    assert recipe["result_qty"] == 1
+    with pytest.raises(DomainError) as exc_info:
+        await admin.create_content(session, owner, "recipe", {
+            "code": "bad_recipe", "name": "X", "result_item_code": "no_such_item",
+        })
+    assert "не существует" in exc_info.value.message
+
+    # валидация: interactive без choices; опасность наоборот; дубль кода
+    for bad in (
+        {"code": "e1", "name": "X", "kind": "interactive", "script": {}},
+        {"code": "e2", "name": "X", "kind": "automatic", "danger_min": 5, "danger_max": 2,
+         "script": {"variants": [{"weight": 1}]}},
+        {"code": "test_event", "name": "Дубль", "kind": "automatic",
+         "script": {"variants": [{"weight": 1}]}},
+    ):
+        with pytest.raises(DomainError) as exc_info:
+            await admin.create_content(session, cm, "event", bad)
+        assert exc_info.value.code == "bad_content"
+
+    # правка задания
+    updated = await admin.update_content(session, cm, "quest", "tutorial_1", {
+        "name": "Первый вылет (обновлено)", "kind": "tutorial", "chain_order": 1,
+        "objectives": [{"type": "expedition_start", "count": 1}],
+        "rewards": {"quant": 200, "xp": 10},
+    })
+    assert updated["name"] == "Первый вылет (обновлено)"
+
+    # удаление: без ссылок — жёсткое; задание с прогрессом игрока — архив
+    result = await admin.delete_content(session, owner, "recipe", "test_recipe")
+    assert result["mode"] == "hard"
+    result = await admin.delete_content(session, owner, "event", "quiet_drift")
+    assert result["mode"] == "hard"  # в тестовой БД истории по нему нет
+
+    await _character(session, seeded)  # получает tutorial_1 автоматически
+    result = await admin.delete_content(session, owner, "quest", "tutorial_1")
+    assert result["mode"] == "archived"  # прогресс игроков не стираем
+    catalog = await admin.list_content(session, owner)
+    tutorial_1 = next(q for q in catalog["quests"] if q["code"] == "tutorial_1")
+    assert tutorial_1["status"] == "archived"
+    assert all(e["code"] != "quiet_drift" for e in catalog["events"])
+    assert all(r["code"] != "test_recipe" for r in catalog["recipes"])
+
+    # аудит
+    actions = (
+        await session.scalars(
+            sa.select(AuditLog.action).where(AuditLog.target_id.in_(
+                ["test_event", "test_recipe", "quiet_drift", "tutorial_1"]
+            ))
+        )
+    ).all()
+    assert {"create_content", "update_content", "delete_content"} <= set(actions)
+
+
+@requires_db
 async def test_server_load_and_audit_log_view(session, seeded):
     """Аналитика: нагрузка на сервер + журнал аудита (время МСК, ключ, суть)."""
     import re
