@@ -117,6 +117,13 @@ async def test_tutorial_chain_progression(session, seeded, bus):
     assert active and active[0][1].code in ("tutorial_2", "tutorial_3")
 
     # шаг 3: победа в бою (засада могла начать бой уже на шаге 2)
+    # события шага 2 могли рандомно повредить корпус — чиним, чтобы бой был детерминирован
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    from core.hull import max_hull
+
+    ship.current_hull = max_hull(ship.base_max_hull, ship.malfunctions)
+    await session.flush()
     battle = await battles.get_active_battle(session, character.id)
     if battle is None:
         battle = await battles.start_battle(

@@ -88,9 +88,29 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     expedition = await expeditions.launch_expedition(session, character)
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
-    # свободное плавание: [Исследовать][Залатать корабль] / [Инфо][В космопорт]
+    # свободное плавание: [Исследовать][Залатать] / [Инфо][В космопорт]
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Исследовать", "Залатать корабль"], ["Инфо", "В космопорт"]]
+    assert rows == [["Исследовать", "Залатать"], ["Инфо", "В космопорт"]]
+
+    # во время ремонта — только «Инфо»
+    from app.models_game import Ship
+
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.current_hull = 40
+    await session.flush()
+    await expeditions.start_patch(session, character)
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    assert _labels(kb) == ["Инфо"]
+    # завершаем ремонт напрямую — снова полное меню
+    expedition.patch_eta = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+    await expeditions.patch_complete(session, {"expedition_id": str(expedition.id)})
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows == [["Исследовать", "Залатать"], ["Инфо", "В космопорт"]]
 
     # в пути между событиями — только «Инфо»
     await expeditions.proceed(session, character, rng=random.Random(1))
@@ -114,7 +134,7 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     if expedition.status == "active":
-        assert rows == [["Исследовать", "Залатать корабль"], ["Инфо", "В космопорт"]]
+        assert rows == [["Исследовать", "Залатать"], ["Инфо", "В космопорт"]]
 
     # кнопка способности появляется, только если модуль установлен
     await battles.start_battle(

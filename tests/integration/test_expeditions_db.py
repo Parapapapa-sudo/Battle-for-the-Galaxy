@@ -412,8 +412,31 @@ async def test_travel_between_events(session, seeded):
 
 
 @requires_db
+async def test_status_message_after_event_completion(session, seeded):
+    """После завершения события — отдельное сообщение: прочность, поломки, слоты."""
+    character = await _character(session, seeded, fuel=50)
+    expedition = await expeditions.launch_expedition(session, character)
+
+    event = await _go(session, character, expedition, rng=random.Random(7))
+    assert event is not None
+    if event.snapshot["kind"] == "interactive":
+        key = str(event.snapshot["script"]["choices"][0]["key"])
+        await expeditions.resolve_choice(session, character, key, rng=random.Random(3))
+
+    texts = await _outbox_texts(session, character)
+    status_idx = [i for i, text in enumerate(texts) if "Состояние корабля:" in text]
+    assert status_idx, "сообщение о состоянии не пришло"
+    status = texts[status_idx[-1]]
+    assert "Прочность:" in status and "Поломки:" in status
+    assert "Инвентарь: свободно" in status
+    # порядок: сначала событие, потом состояние
+    outcome_idx = [i for i, text in enumerate(texts) if "Событие «" in text]
+    assert outcome_idx and status_idx[-1] > outcome_idx[-1]
+
+
+@requires_db
 async def test_go_blocked_when_hull_too_low(session, seeded):
-    """Прочность <= 1: исследование запрещено (лечение — «Залатать корабль»)."""
+    """Прочность <= 1: исследование запрещено (лечение — «Залатать»)."""
     character = await _character(session, seeded, fuel=50)
     await expeditions.launch_expedition(session, character)
     ship = await session.get(Ship, character.id)

@@ -173,11 +173,18 @@ async def cmd_exp(session: AsyncSession, ctx: CommandContext, args: dict[str, An
                 fuel=expedition.fuel_remaining,
             )
         )
+    from datetime import UTC, datetime
+
+    if expedition.patch_eta is not None:  # идёт ремонт — состояние + остаток времени
+        wait = max(1, int((expedition.patch_eta - datetime.now(UTC)).total_seconds()) + 1)
+        return CommandResult(
+            message=await expeditions.describe_ship_status(session, character)
+            + "\n"
+            + t("patch_eta_line", lang, wait=wait)
+        )
     offered = await expeditions._current_offered_event(session, expedition)
     if offered is not None:
         return CommandResult(message=expeditions.describe_event(offered, lang=lang))
-    from datetime import UTC, datetime
-
     if expedition.next_event_at is not None and expedition.next_event_at > datetime.now(UTC):
         wait = int((expedition.next_event_at - datetime.now(UTC)).total_seconds()) + 1
         return CommandResult(

@@ -257,6 +257,7 @@ async def arrive_event(
             character_id=character.id,
             text=describe_event(event, lang=lang),
         )
+        await _queue_status(session, character)  # состояние — после исхода события
     else:
         await stores.add_outbox(
             session,
@@ -407,6 +408,7 @@ async def resolve_choice(
         pick_variant(choice["variants"], rng) if "variants" in choice else choice["outcome"]
     )
     await _apply_outcome(session, character, expedition, event, outcome, rng)
+    await _queue_status(session, character)  # отдельное сообщение о состоянии
     return event
 
 
@@ -422,6 +424,7 @@ async def decline_event(session: AsyncSession, character: Character) -> Expediti
     event.status = "declined"
     event.resolved_at = datetime.now(UTC)
     event.resolution = {"declined": True}
+    await _queue_status(session, character)  # отказ тоже завершает событие
     await session.flush()
     return event
 
@@ -528,6 +531,38 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
     await session.flush()
 
 
+async def describe_ship_status(session: AsyncSession, character: Character) -> str:
+    """Сводка состояния: прочность (с индикатором), поломки, свободные слоты инвентаря."""
+    from core.battle import hp_bar
+
+    lang = character.lang
+    ship = await get_ship(session, character.id)
+    cap = max_hull(ship.base_max_hull, ship.malfunctions)
+    bar, pct = hp_bar(ship.current_hull, max(1, cap))
+    inventory, rows = await characters.list_inventory(session, character.id)
+    lines = [
+        t("status_title", lang),
+        t("status_hull", lang, cur=ship.current_hull, max=cap),
+        f"{bar} {pct}%",
+        t("status_malfunctions", lang, n=ship.malfunctions),
+    ]
+    if inventory.size_limit is not None:
+        free = max(0, inventory.size_limit - len(rows))
+        lines.append(t("status_inventory", lang, free=free, total=inventory.size_limit))
+    else:
+        lines.append(t("status_inventory_unlimited", lang))
+    return "\n".join(lines)
+
+
+async def _queue_status(session: AsyncSession, character: Character) -> None:
+    """Отдельное сообщение о состоянии корабля — после КАЖДОГО завершения события."""
+    await stores.add_outbox(
+        session,
+        character_id=character.id,
+        text=await describe_ship_status(session, character),
+    )
+
+
 async def describe_travel(
     session: AsyncSession, character: Character, expedition: Expedition
 ) -> str:
@@ -560,13 +595,17 @@ def _raise_if_traveling(expedition: Expedition | None) -> None:
 
 
 def _raise_if_repairing(expedition: Expedition | None) -> None:
+    """Ремонт идёт, пока patch_eta не снят обработчиком таймера (patch_complete).
+
+    Строгая проверка (не только eta в будущем): иначе между истечением eta и
+    срабатыванием таймера можно было запустить второй ремонт — двойной таймер,
+    и уведомление о завершении приходило один раз на два ремонта.
+    """
     if expedition is not None and expedition.patch_eta is not None:
-        now = datetime.now(UTC)
-        if expedition.patch_eta > now:
-            wait = int((expedition.patch_eta - now).total_seconds()) + 1
-            raise DomainError(
-                "ship_repairing", f"Идёт ремонт корабля — осталось {wait}с.", details={"wait_sec": wait}
-            )
+        wait = max(1, int((expedition.patch_eta - datetime.now(UTC)).total_seconds()) + 1)
+        raise DomainError(
+            "ship_repairing", f"Идёт ремонт корабля — осталось {wait}с.", details={"wait_sec": wait}
+        )
 
 
 async def start_patch(session: AsyncSession, character: Character) -> int:
