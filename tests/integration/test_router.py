@@ -165,6 +165,48 @@ async def test_onboarding_full_flow(session, seeded, sessions):
 
 
 @requires_db
+async def test_shop_display_and_buy_flow(session, seeded, sessions):
+    """Магазин: человекочитаемая витрина; паки Эонов — счёт в рублях, подписки — за Эоны."""
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="start Покупатель Тестов azimuth", idempotency_key=_key(),
+    )
+
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="shop", idempotency_key=_key(),
+    )
+    assert "💎 Эоны (оплата в рублях)" in r.message
+    assert "100 Эонов за 100 ₽" in r.message
+    assert "Подписка на 7 дн. — 99 Эонов" in r.message
+    assert "subscription —" not in r.message  # сырых кодов/видов больше нет
+
+    # пак Эонов → платёжный заказ со ссылкой на оплату (не списание Эонов)
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="buy eon_pack_100", idempotency_key=_key(),
+    )
+    assert "Счёт создан: 100 Эонов за 100 ₽" in r.message
+    assert "Оплатить:" in r.message
+
+    # подписка за Эоны: без средств — понятная ошибка
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="buy sub_7", idempotency_key=_key(),
+    )
+    assert "Недостаточно" in r.message
+
+    # неизвестное предложение
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="buy no_such_offer", idempotency_key=_key(),
+    )
+    assert "не найдено" in r.message
+
+
+@requires_db
 async def test_ui_command_reloads_menu(session, seeded, sessions):
     """«ui» — перезагрузка интерфейса: работает и без персонажа, и с ним."""
     bus = CommandBus()

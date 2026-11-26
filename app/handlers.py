@@ -745,19 +745,68 @@ async def cmd_shop(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     offers = await market.list_offers(session)
     if not offers:
         return CommandResult(message=t("shop_empty", lang))
-    lines = [
-        t("shop_item", lang, code=o.code, kind=o.kind, price=o.price_eon) for o in offers
-    ]
-    lines.append(t("shop_hint", lang))
-    return CommandResult(message=t("shop_title", lang) + "\n" + "\n".join(lines))
+    packs = [o for o in offers if o.kind == "pack"]
+    subs = [o for o in offers if o.kind == "subscription"]
+    blocks = [t("shop_title", lang)]
+    if packs:
+        lines = [t("shop_section_rub", lang)]
+        for offer in packs:
+            lines.append(
+                t(
+                    "shop_pack_item",
+                    lang,
+                    eons=int(offer.payload.get("eons", 0)),
+                    rub=offer.price_rub,
+                    code=offer.code,
+                )
+            )
+        blocks.append("\n".join(lines))
+    if subs:
+        lines = [t("shop_section_eon", lang)]
+        for offer in subs:
+            days = market.SUB_DURATION.get(str(offer.payload.get("kind", offer.code)), "?")
+            lines.append(
+                t("shop_sub_item", lang, days=days, price=offer.price_eon, code=offer.code)
+            )
+        blocks.append("\n".join(lines))
+    blocks.append(t("shop_hint", lang))
+    return CommandResult(message="\n\n".join(blocks))
 
 
 async def cmd_buy(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     code = str(args.get("code", "")).strip()
+    from app.models_game import ShopOffer
+
+    offer = await session.scalar(
+        sa.select(ShopOffer).where(ShopOffer.code == code, ShopOffer.status == "published")
+    )
+    if offer is None:
+        raise DomainError("unknown_offer", t("shop_unknown", lang, code=code))
+
+    if offer.kind == "pack":
+        # паки Эонов — за рубли через платёжного провайдера (заказ + pay_url)
+        from adapters.payments.mock import provider_from_settings
+        from app import payments
+        from app.config import get_settings
+
+        order = await payments.create_order(
+            session,
+            character,
+            offer_code=code,
+            provider=provider_from_settings(get_settings()),
+        )
+        return CommandResult(
+            message=t("buy_pack_order", lang, eons=order.eons, rub=order.amount_rub, url=order.pay_url),
+            data={"order_id": str(order.id)},
+        )
+
     purchase = await market.buy_offer(session, character, code)
+    days = market.SUB_DURATION.get(str(offer.payload.get("kind", code)), "?")
     return CommandResult(
-        message=t("buy_ok", character.lang, code=code, status=purchase.status)
+        message=t("buy_sub_ok", lang, days=days, price=offer.price_eon),
+        data={"purchase_id": str(purchase.id)},
     )
 
 

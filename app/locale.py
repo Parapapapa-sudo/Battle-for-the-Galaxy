@@ -142,10 +142,23 @@ RU: dict[str, str] = {
     "bid_buyout": "Продано с выкупом: {code}, ваша цена {amount}.",
     "market_order": "Ордер {side} размещён: {amount} Эонов по {price} Квантов. ID: {id8}",
     "market_help": "Внутренний рынок Эонов. Ориентир: 1 Эон ≈ {reference} Квантов.\nmarket buy <эоны> <цена> — купить Эоны за Кванты\nmarket sell <эоны> <цена> — продать Эоны за Кванты\nСведение ордеров — автоматически (worker).",
-    "shop_empty": "Магазин пуст.",
-    "shop_title": "🛒 Магазин:",
-    "shop_item": "{code}: {kind} — {price} Эонов",
-    "shop_hint": "Покупка: buy <код>",
+    "shop_empty": "🛒 Магазин пуст.",
+    "shop_title": "🛒 Магазин",
+    "shop_section_rub": "💎 Эоны (оплата в рублях):",
+    "shop_pack_item": "— {eons} Эонов за {rub} ₽ · buy {code}",
+    "shop_section_eon": "⭐ Подписки (за Эоны):",
+    "shop_sub_item": "— Подписка на {days} дн. — {price} Эонов · buy {code}",
+    "shop_hint": "Покупка: buy <код> (например, buy eon_pack_100).",
+    "shop_unknown": "Предложение «{code}» не найдено — смотрите «Магазин».",
+    "buy_pack_order": (
+        "💳 Счёт создан: {eons} Эонов за {rub} ₽.\n\n"
+        "Оплатить: {url}\n\n"
+        "Эоны начислятся автоматически сразу после оплаты."
+    ),
+    "buy_sub_ok": (
+        "✅ Подписка на {days} дн. активирована (−{price} Эонов).\n\n"
+        "Бонусы: расширенный инвентарь и дополнительный слот крафта."
+    ),
     "buy_ok": "Покупка «{code}» оплачена ({status}).",
     # sync / quests
     "sync_empty": "✅ Все таймеры в норме, застреваний нет.",
@@ -373,10 +386,23 @@ EN: dict[str, str] = {
     "bid_buyout": "Buyout: {code}, your price {amount}.",
     "market_order": "{side} order placed: {amount} Eons at {price} Quants. ID: {id8}",
     "market_help": "Internal Eon market. Reference: 1 Eon ≈ {reference} Quants.\nmarket buy <eons> <price> — buy Eons with Quants\nmarket sell <eons> <price> — sell Eons for Quants\nOrders are matched automatically (worker).",
-    "shop_empty": "Shop is empty.",
-    "shop_title": "🛒 Shop:",
-    "shop_item": "{code}: {kind} — {price} Eons",
-    "shop_hint": "Buy: buy <code>",
+    "shop_empty": "🛒 Shop is empty.",
+    "shop_title": "🛒 Shop",
+    "shop_section_rub": "💎 Eons (pay in rubles):",
+    "shop_pack_item": "— {eons} Eons for {rub} ₽ · buy {code}",
+    "shop_section_eon": "⭐ Subscriptions (for Eons):",
+    "shop_sub_item": "— {days}-day subscription — {price} Eons · buy {code}",
+    "shop_hint": "To buy: buy <code> (e.g. buy eon_pack_100).",
+    "shop_unknown": "Offer «{code}» not found — see the Shop.",
+    "buy_pack_order": (
+        "💳 Invoice created: {eons} Eons for {rub} ₽.\n\n"
+        "Pay: {url}\n\n"
+        "Eons are credited automatically right after payment."
+    ),
+    "buy_sub_ok": (
+        "✅ {days}-day subscription activated (−{price} Eons).\n\n"
+        "Bonuses: bigger inventory and an extra crafting slot."
+    ),
     "buy_ok": "Purchase «{code}» paid ({status}).",
     "sync_empty": "✅ All timers are fine, nothing is stuck.",
     "sync_fired": "Processed overdue events: {names}.",
