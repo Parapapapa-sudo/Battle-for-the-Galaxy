@@ -800,14 +800,27 @@ async def cmd_sync(session: AsyncSession, ctx: CommandContext, args: dict[str, A
 async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     lang = character.lang
-    text = t("quests_title", lang) + "\n" if await quests_mod.active_quests(session, character) else ""
-    for state, quest in await quests_mod.active_quests(session, character):
+    active = await quests_mod.active_quests(session, character)
+    blocks: list[str] = [t("quests_title", lang)] if active else []
+    for state, quest in active:
         parts = []
         for idx, objective in enumerate(quest.objectives):
             need = int(objective.get("count", 1))
             have = min(int(state.progress.get(str(idx), 0)), need)
-            parts.append(f"{objective.get('type')} {have}/{need}")
-        text += t("quest_item", lang, name=quest.name, progress=", ".join(parts)) + "\n"
+            otype = str(objective.get("type"))
+            label = t(f"obj_{otype}", lang)
+            if label == f"obj_{otype}":  # неизвестный тип цели — показываем код как есть
+                label = otype
+            parts.append(f"{label}: {have}/{need}")
+        blocks.append(
+            t(
+                "quest_item",
+                lang,
+                name=quest.name,
+                description=quest.description,
+                progress=", ".join(parts),
+            )
+        )
     now = datetime.now(UTC)
     events = (
         await session.scalars(
@@ -836,8 +849,10 @@ async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str,
                     until=f"{event.ends_at:%d.%m %H:%M}",
                 )
             )
-        text += "\n" + "\n".join(lines)
-    return CommandResult(message=text.rstrip())
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return CommandResult(message=t("quests_none", lang))
+    return CommandResult(message="\n\n".join(blocks))
 
 
 # --- разбор текста (общий для адаптеров) --------------------------------------
