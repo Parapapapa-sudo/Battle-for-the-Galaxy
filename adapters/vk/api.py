@@ -6,6 +6,7 @@
 """
 import json
 import random
+import uuid
 from typing import Any
 
 import httpx
@@ -97,6 +98,14 @@ class VkSender:
         self._api = api
 
     async def send(self, *, character_id: str, text: str, platform: str | None) -> None:
+        # уведомление приходит с АКТУАЛЬНОЙ клавиатурой — меню обновляется без команд от игрока
+        keyboard: dict[str, Any] | None = None
+        async with self._sessions() as session:
+            character = await session.get(Character, uuid.UUID(character_id))
+            if character is not None:
+                from app.keyboards import keyboard_for_character
+
+                keyboard = await keyboard_for_character(session, character.id)
         async with self._sessions() as session:
             rows = (
                 await session.scalars(
@@ -109,4 +118,4 @@ class VkSender:
                 )
             ).all()
         for user_id in rows:
-            await self._api.send_message(int(user_id), text)
+            await self._api.send_message(int(user_id), text, keyboard=keyboard)

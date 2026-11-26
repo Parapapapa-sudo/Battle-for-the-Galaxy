@@ -140,7 +140,8 @@ async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
             bus, sessions, platform="console", platform_user_id=user,
             text="go", idempotency_key=_key(),
         )
-        if "Отказ: decline" in r.message:  # интерактивное событие открыто
+        # интерактивное событие открыто: заголовок есть, исхода ещё нет
+        if "Событие «" in r.message and "Исход:" not in r.message:
             break
         await route_text_command(
             bus, sessions, platform="console", platform_user_id=user,

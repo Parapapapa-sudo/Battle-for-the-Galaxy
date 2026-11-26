@@ -166,6 +166,12 @@ async def proceed(
         raise DomainError("battle_active", "Сначала завершите бой (attack / retreat).")
     expedition = await get_ongoing_expedition(session, character.id)
     _raise_if_repairing(expedition)
+    _ship = await get_ship(session, character.id)
+    if _ship.current_hull <= 1:
+        raise DomainError(
+            "hull_too_low",
+            t("hull_too_low", character.lang),
+        )
     if expedition is None or expedition.status != "active":
         raise DomainError("no_expedition", "Экспедиция не активна.")
 
@@ -433,7 +439,8 @@ async def _start_return(
     text = messages[reason]
     if extra:
         text += "\n" + "\n".join(extra)
-    await stores.add_outbox(session, character_id=character.id, text=text)
+    # уведомление об отправлении идёт как ответ на команду (клавиатура обновится);
+    # дубль в outbox не нужен — иначе игрок получает одно и то же дважды
     await session.flush()
 
 
@@ -570,12 +577,7 @@ def describe_event(
         t("event_title", lang, name=snap.get("name", "?"), danger=label),
         snap.get("description", ""),
     ]
-    if event.status == "offered" and snap.get("kind") == "interactive":
-        for choice in snap.get("script", {}).get("choices", []):
-            lines.append(f"{choice.get('key')}. {choice.get('text')}")
-        if snap.get("can_refuse"):
-            lines.append(t("event_refuse", lang))
-    elif event.status == "resolved":
+    if event.status == "resolved":
         outcome = (event.resolution or {}).get("outcome", {})
         lines.append(t("event_outcome", lang, message=outcome.get("message", "")))
         for effect in (event.resolution or {}).get("effects", []):

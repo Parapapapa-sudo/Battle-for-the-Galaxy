@@ -198,7 +198,8 @@ async def test_voluntary_return_scenario(session, seeded):
     await expeditions.arrive_expedition(session, {"expedition_id": str(expedition.id)})
 
     texts = await _outbox_texts(session, character)
-    assert any("Возвращение началось" in t for t in texts)
+    # «Возвращение началось» — ответ на команду (не дублируем в outbox);
+    # прибытие уведомляет через outbox
     assert any("Прибыли в космопорт" in t for t in texts)
 
 
@@ -338,3 +339,37 @@ async def test_event_cooldown_between_go(session, seeded):
     await _no_cooldown(session, expedition)
     event, _ = await expeditions.proceed(session, character, rng=random.Random(2))
     assert event is not None  # после ожидания go снова работает
+
+
+@requires_db
+async def test_go_blocked_when_hull_too_low(session, seeded):
+    """Прочность <= 1: исследование запрещено (лечение — «Залатать корабль»)."""
+    character = await _character(session, seeded, fuel=50)
+    await expeditions.launch_expedition(session, character)
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.current_hull = 1
+    await session.flush()
+
+    with pytest.raises(DomainError) as exc_info:
+        await expeditions.proceed(session, character, rng=random.Random(1))
+    assert exc_info.value.code == "hull_too_low"
+    assert "не позволяет продолжить исследование" in exc_info.value.message
+
+    # ремонт возвращает возможность исследовать
+    await expeditions.start_patch(session, character)
+    expedition = await expeditions.get_ongoing_expedition(session, character.id)
+    assert expedition is not None
+    expedition.patch_eta = datetime.now(UTC) - timedelta(seconds=1)
+    await session.execute(
+        sa.update(Timer)
+        .where(Timer.type == "ship_patch", Timer.status == "pending")
+        .values(fires_at=expedition.patch_eta)
+    )
+    await session.flush()
+    await expeditions.patch_complete(session, {"expedition_id": str(expedition.id)})
+    await session.refresh(ship)
+    assert ship.current_hull == 100
+    await _no_cooldown(session, expedition)
+    event, _ = await expeditions.proceed(session, character, rng=random.Random(1))
+    assert event is not None  # go снова работает

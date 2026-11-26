@@ -24,9 +24,22 @@ from worker.dispatcher import OutboxDispatcher, dispatcher_from_settings
 log = structlog.get_logger(__name__)
 
 
-async def pump_outbox(dispatcher: OutboxDispatcher, stop: asyncio.Event, interval: float = 0.5) -> None:
+async def pump_outbox(
+    dispatcher: OutboxDispatcher,
+    stop: asyncio.Event,
+    *,
+    bus: CommandBus,
+    handlers: dict[str, Any],
+    interval: float = 0.5,
+) -> None:
+    """Фоновая поддержка: таймеры (прибытие/крафт/ремонт) + доставка outbox.
+
+    Бот обрабатывает таймеры сам — не только worker: прибытие не должно
+    зависеть от отдельного процесса (claim атомарен, повторные запуски безопасны).
+    """
     while not stop.is_set():
         try:
+            await bus.run_due_timers(timer_handlers=handlers)
             await dispatcher.run_once()
         except Exception:  # noqa: BLE001 — цикл не должен умирать
             log.exception("outbox_pump_error")
@@ -59,7 +72,10 @@ async def run_bot() -> None:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop.set)
 
-    pump = asyncio.create_task(pump_outbox(dispatcher, stop))
+    from app.timer_handlers import build_timer_handlers
+
+    handlers = await build_timer_handlers()
+    pump = asyncio.create_task(pump_outbox(dispatcher, stop, bus=bus, handlers=handlers))
     log.info("vk_bot_started", group=settings.vk_group_id)
 
     lp = await api.get_long_poll_server(settings.vk_group_id)

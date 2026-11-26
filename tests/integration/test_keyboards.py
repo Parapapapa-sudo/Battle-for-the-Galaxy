@@ -18,9 +18,10 @@ def test_vk_keyboard_structure() -> None:
     assert len(kb["buttons"]) == 2
     first = kb["buttons"][0][0]
     assert first["action"]["type"] == "text"
-    assert first["action"]["label"] == "attack"
+    assert first["action"]["label"] == "Атака"
     assert first["color"] == "positive"  # боевые — зелёным
     retreat = kb["buttons"][1][0]
+    assert retreat["action"]["label"] == "Отступить"
     assert retreat["color"] == "negative"
 
 
@@ -74,7 +75,7 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     labels = set(_labels(kb))
-    assert {"attack", "shot", "retreat"} <= labels
+    assert {"Атака", "shot", "Отступить", "Ремонт"} <= labels
     assert "go" not in labels  # в бою экспедиционного меню нет
 
 
