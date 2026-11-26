@@ -428,7 +428,7 @@ async def test_status_message_after_event_completion(session, seeded):
         await expeditions.resolve_choice(session, character, key, rng=random.Random(3))
 
     texts = await _outbox_texts(session, character)
-    status_idx = [i for i, text in enumerate(texts) if "Состояние корабля:" in text]
+    status_idx = [i for i, text in enumerate(texts) if "Состояние корабля" in text]
     assert status_idx, "сообщение о состоянии не пришло"
     status = texts[status_idx[-1]]
     assert "Прочность:" in status and "Поломки:" in status

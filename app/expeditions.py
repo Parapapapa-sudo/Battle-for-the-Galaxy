@@ -566,7 +566,10 @@ async def arrive_expedition(session: AsyncSession, payload: dict[str, Any]) -> N
 
 
 async def describe_ship_status(session: AsyncSession, character: Character) -> str:
-    """Сводка состояния: прочность (с индикатором), поломки, свободные слоты инвентаря."""
+    """Сводка состояния: прочность (с индикатором), поломки, свободные слоты.
+
+    Блоки разделены пустыми строками, у каждого — иконка (читаемость в чате).
+    """
     from core.battle import hp_bar
 
     lang = character.lang
@@ -574,18 +577,20 @@ async def describe_ship_status(session: AsyncSession, character: Character) -> s
     cap = max_hull(ship.base_max_hull, ship.malfunctions)
     bar, pct = hp_bar(ship.current_hull, max(1, cap))
     inventory, rows = await characters.list_inventory(session, character.id)
-    lines = [
-        t("status_title", lang),
-        t("status_hull", lang, cur=ship.current_hull, max=cap),
-        f"{bar} {pct}%",
-        t("status_malfunctions", lang, n=ship.malfunctions),
-    ]
+    hull_block = t("status_hull", lang, cur=ship.current_hull, max=cap) + f"\n{bar} {pct}%"
     if inventory.size_limit is not None:
         free = max(0, inventory.size_limit - len(rows))
-        lines.append(t("status_inventory", lang, free=free, total=inventory.size_limit))
+        inventory_line = t("status_inventory", lang, free=free, total=inventory.size_limit)
     else:
-        lines.append(t("status_inventory_unlimited", lang))
-    return "\n".join(lines)
+        inventory_line = t("status_inventory_unlimited", lang)
+    return "\n\n".join(
+        [
+            t("status_title", lang),
+            hull_block,
+            t("status_malfunctions", lang, n=ship.malfunctions),
+            inventory_line,
+        ]
+    )
 
 
 async def _queue_status(session: AsyncSession, character: Character) -> None:
