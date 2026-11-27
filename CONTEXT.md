@@ -182,6 +182,20 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/space_mm
 7. Уникальные предметы: не продать (sellable=False), sellable/tradable — независимы.
 8. Эоны: mint только за оплату, burn только за покупки; 1 Эон = 1 ₽ (eon.rub_rate).
 
+## Прод-сервер (с 2026-11-27)
+
+- VPS Ростелеком: 93.183.104.131, Ubuntu 24.04 (KVM), 3 vCPU / 2 ГБ / 35 ГБ.
+- Приложение: /opt/bfg (venv .venv), БД PostgreSQL 17 локально (db/user `bfg`,
+  пароль в /opt/bfg/.env). Службы systemd: bfg-bot, bfg-worker, bfg-api
+  (uvicorn 127.0.0.1:8000). HTTPS — Caddy (/etc/caddy/Caddyfile,
+  teacher-tech.ru → 127.0.0.1:8000, сертификат автоматически после A-записи).
+- SSH: только по ключу (ключ на дев-ПК ~/.ssh/id_ed25519), парольный вход выключен.
+- Обновление прода: `bash tools/deploy.sh` из корня репо (архив HEAD → scp →
+  pip/alembic → рестарт служб). Сиды: `./.venv/bin/python -m app.seeds` на сервере.
+- Локальные сервисы (tools/start-services.bat) остановлены и нужны только для
+  разработки: одновременный запуск локального и серверного бота = два поллера
+  VK (дубли!). Локальная БД — тестовая песочница, прод-данные только на сервере.
+
 ## Открыто (только заказчик)
 
 - B1 платёжный провайдер (контур готов: `adapters/payments/base.py` — реализовать
