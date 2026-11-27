@@ -116,6 +116,7 @@ section.active { display: block; }
         <option value="recipe">Рецепт</option>
         <option value="ship">Корабль</option>
         <option value="faction">Фракция</option>
+        <option value="enemy">Враг</option>
       </select>
       <select id="ce-code" onchange="contentEditFill()" title="Контент"></select>
     </div>
@@ -135,6 +136,7 @@ section.active { display: block; }
         <option value="recipe">Рецепт</option>
         <option value="ship">Корабль</option>
         <option value="faction">Фракция</option>
+        <option value="enemy">Враг</option>
       </select>
     </div>
     <div id="ca-form"></div>
@@ -409,7 +411,7 @@ const CONTENT_FIELDS = {
     ["code", "Код (a-z, 0-9, _)", "text"],
     ["name", "Название", "text"],
     ["description", "Описание", "textarea"],
-    ["kind", "Тип задания", "select", ["tutorial", "story"]],
+    ["kind", "Тип задания", "select", ["tutorial", "story", "faction"]],
     ["chain_order", "Порядок в цепочке", "number"],
     ["objectives", 'Цели JSON: [{"type": "event_resolved", "count": 2}]', "json"],
     ["rewards", 'Награды JSON: {"quant": 100, "xp": 10, "items": [{"code": "...", "qty": 1}]}', "json"],
@@ -432,6 +434,17 @@ const CONTENT_FIELDS = {
     ["kind", "Вид фракции", "select", ["main", "neutral"]],
     ["bonuses", 'Бонусы JSON: {"hull_bonus_pct": 5} (пусто — без бонусов)', "json"],
   ],
+  enemy: [
+    ["code", "Код (a-z, 0-9, _)", "text"],
+    ["name", "Название", "text"],
+    ["category", "Категория", "select", ["normal", "dangerous", "elite", "boss"]],
+    ["faction", "Фракция", "faction"],
+    ["stats", 'Характеристики JSON: {"hull": 40, "damage": 8, "xp": 15}', "json"],
+    ["reputation", 'Репутация за победу JSON: {"pirates": -25, "azimuth": 10}', "json"],
+    ["abilities", 'Способности JSON: ["ионный_залп"] (коды)', "json"],
+    ["passives", "Пассивы JSON (elite/boss)", "json"],
+    ["weaknesses", "Слабости JSON (elite/boss)", "json"],
+  ],
   ship: [
     ["code", "Код (a-z, 0-9, _)", "text"],
     ["name", "Название", "text"],
@@ -449,6 +462,7 @@ const CONTENT_DEFAULTS = {
   recipe: { result_qty: 1, materials: [{ code: "scrap_metal", qty: 1 }], duration_sec: 60, cancel_return_pct: 50, status: "published" },
   ship: { faction: "", max_hull: 100, fuel_capacity: 50, attack: 5, defense: 5, module_slots: 3 },
   faction: { kind: "neutral", bonuses: {} },
+  enemy: { category: "normal", faction: "", stats: { hull: 40, damage: 8, xp: 15 }, reputation: {}, abilities: [], passives: {}, weaknesses: {} },
 };
 let CONTENT = null;
 async function loadContentList() {

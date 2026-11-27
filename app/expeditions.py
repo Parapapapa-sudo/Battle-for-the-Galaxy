@@ -236,6 +236,13 @@ async def arrive_event(
         await session.flush()
         return
 
+    # 1% (config): вместо обычного события — посланник нейтральной фракции с квестом
+    fq_chance = int(await stores.get_param(session, "expedition.faction_quest_chance_pct", 1))
+    if rng.random() * 100 < fq_chance:
+        offered = await _offer_faction_quest(session, character, expedition, rng, lang)
+        if offered is not None:
+            return
+
     expedition.fuel_remaining -= template.fuel_cost
     expedition.depth += 1
     expedition.next_event_at = None
@@ -271,6 +278,90 @@ async def arrive_event(
     await session.flush()
 
 
+async def _offer_faction_quest(
+    session: AsyncSession,
+    character: Character,
+    expedition: Expedition,
+    rng: random.Random,
+    lang: str,
+) -> ExpeditionEvent | None:
+    """Событие-посланник: случайная нейтральная фракция предлагает квест (ТЗ).
+
+    Можно взять (награда + репутация с фракцией) или пропустить без последствий.
+    """
+    from app.models_game import CharacterQuest, Faction, QuestTemplate
+
+    taken = set(
+        (
+            await session.scalars(
+                sa.select(QuestTemplate.code)
+                .join(CharacterQuest, CharacterQuest.quest_id == QuestTemplate.id)
+                .where(CharacterQuest.character_id == character.id)
+            )
+        ).all()
+    )
+    candidates = [
+        q
+        for q in (
+            await session.scalars(
+                sa.select(QuestTemplate).where(
+                    QuestTemplate.kind == "faction", QuestTemplate.status == "published"
+                )
+            )
+        ).all()
+        if q.code not in taken
+    ]
+    if not candidates:
+        return None
+    quest = rng.choice(candidates)
+    base = await session.scalar(
+        sa.select(EventTemplate).where(EventTemplate.code == "faction_quest_offer")
+    )
+    if base is None:
+        return None
+    faction = await session.get(Faction, quest.faction_id) if quest.faction_id else None
+    faction_name = faction.name if faction else "?"
+    snapshot = {
+        "code": "faction_quest_offer",
+        "name": f"Посланник: {faction_name}",
+        "description": (
+            f"К вам на связь выходит представитель фракции «{faction_name}». "
+            f"{quest.description}"
+        ),
+        "kind": "interactive",
+        "danger_min": 1,
+        "danger_max": 1,
+        "can_refuse": True,  # «Пропустить» = обычный отказ, ничего не происходит (ТЗ)
+        "script": {
+            "choices": [
+                {
+                    "key": "accept",
+                    "text": "Взять задание",
+                    "outcome": {
+                        "message": f"Вы приняли задание «{quest.name}».",
+                        "faction_quest": quest.code,
+                    },
+                },
+            ]
+        },
+    }
+    event = ExpeditionEvent(
+        expedition_id=expedition.id,
+        event_template_id=base.id,
+        seq=expedition.queue_pos,
+        snapshot=snapshot,
+    )
+    expedition.queue_pos += 1
+    expedition.next_event_at = None
+    session.add(event)
+    await session.flush()
+    await stores.add_outbox(
+        session, character_id=character.id, text=describe_event(event, lang=lang)
+    )
+    await session.flush()
+    return event
+
+
 # --- разрешение событий --------------------------------------------------------
 
 
@@ -284,6 +375,13 @@ async def _apply_outcome(
 ) -> list[str]:
     """Применяет исход: награды (прямой дроп при полном инвентаре — ТЗ), урон корпусу."""
     effects: list[str] = []
+    faction_quest = outcome.get("faction_quest")
+    if faction_quest:
+        from app.quests import accept_faction_quest_offer
+
+        line = await accept_faction_quest_offer(session, character, str(faction_quest))
+        if line:
+            effects.append(line)
     battle_spec = outcome.get("battle")
     if battle_spec:
         # исход события — начало боя (ТЗ: события могут запускать пошаговые бои)

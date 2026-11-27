@@ -17,6 +17,7 @@ from app.models import Timer
 from app.models_game import (
     Character,
     CharacterQuest,
+    Faction,
     FactionEvent,
     FactionEventParticipant,
     QuestTemplate,
@@ -115,6 +116,38 @@ async def accept_quest(session: AsyncSession, character: Character, code: str) -
     return quest
 
 
+async def accept_faction_quest_offer(
+    session: AsyncSession, character: Character, code: str
+) -> str | None:
+    """Принятие фракционного квеста из предложения-посланника (событие экспедиции).
+
+    Возвращает строку для эффектов события или None (уже взят/не найден).
+    """
+    from app.locale import t
+
+    quest = await session.scalar(
+        sa.select(QuestTemplate).where(
+            QuestTemplate.code == code, QuestTemplate.kind == "faction"
+        )
+    )
+    if quest is None:
+        return None
+    existing = await session.scalar(
+        sa.select(CharacterQuest).where(
+            CharacterQuest.character_id == character.id,
+            CharacterQuest.quest_id == quest.id,
+        )
+    )
+    if existing is not None:
+        return None  # уже взят или завершён — повторно не предлагаем
+    session.add(
+        CharacterQuest(character_id=character.id, quest_id=quest.id, status="active")
+    )
+    character.tracked_quest = quest.code
+    await session.flush()
+    return t("faction_quest_accepted", character.lang, name=quest.name)
+
+
 async def track_quest(session: AsyncSession, character: Character, code: str) -> QuestTemplate:
     """Сменить отслеживаемое задание (должно быть активным)."""
     quest = await session.scalar(
@@ -201,23 +234,45 @@ async def _complete_quest(
         )
     if rewards.get("xp"):
         character.xp_pool += int(rewards["xp"])
-    await stores.add_outbox(
-        session,
-        character_id=character.id,
-        text=t("quest_completed", character.lang, name=quest.name),
-    )
 
-    # следующее в цепочке — становится ДОСТУПНЫМ (ждёт принятия)
-    nxt = await session.scalar(
-        sa.select(QuestTemplate).where(
-            QuestTemplate.status == "published",
-            QuestTemplate.chain_order == quest.chain_order + 1,
-            sa.or_(
-                QuestTemplate.faction_id.is_(None),
-                QuestTemplate.faction_id == character.faction_id,
-            ),
+    # репутация: из наград задания (фракционные квесты) + цепочки улучшают
+    # репутацию со СВОЕЙ фракцией (ТЗ)
+    from app import reputation as reputation_app
+
+    rep_lines: list[str] = []
+    if rewards.get("reputation"):
+        rep_lines.extend(
+            await reputation_app.apply_deltas(
+                session, character, rewards["reputation"], character.lang
+            )
         )
-    )
+    if quest.kind in ("tutorial", "story"):
+        own = await session.get(Faction, character.faction_id)
+        if own is not None:
+            own_rep = int(await stores.get_param(session, "quests.own_faction_rep", 250))
+            rep_lines.extend(
+                await reputation_app.apply_deltas(
+                    session, character, {own.code: own_rep}, character.lang
+                )
+            )
+    text = t("quest_completed", character.lang, name=quest.name)
+    if rep_lines:
+        text += "\n" + "\n".join(rep_lines)
+    await stores.add_outbox(session, character_id=character.id, text=text)
+
+    # следующее в цепочке — становится ДОСТУПНЫМ (ждёт принятия); только у цепочек
+    nxt = None
+    if quest.kind in ("tutorial", "story"):
+        nxt = await session.scalar(
+            sa.select(QuestTemplate).where(
+                QuestTemplate.status == "published",
+                QuestTemplate.chain_order == quest.chain_order + 1,
+                sa.or_(
+                    QuestTemplate.faction_id.is_(None),
+                    QuestTemplate.faction_id == character.faction_id,
+                ),
+            )
+        )
     if nxt is not None:
         existing = await session.scalar(
             sa.select(CharacterQuest).where(

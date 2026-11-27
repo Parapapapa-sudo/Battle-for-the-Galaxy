@@ -216,6 +216,50 @@ SHOP_OFFERS: list[dict[str, Any]] = [
 ]
 
 
+# --- Фракционные квесты-предложения в экспедиции (1%, только нейтральные) ---
+FACTION_QUESTS: list[dict[str, Any]] = [
+    dict(
+        code="faction_quest_pirates",
+        faction="pirates",
+        name="Уважение Пепельного Предела",
+        description="Пираты готовы считаться с вами: докажите силу — победите 2 противников.",
+        objectives=[{"type": "battle_won", "count": 2}],
+        rewards={"quant": 300, "xp": 30, "reputation": {"pirates": 500}},
+    ),
+    dict(
+        code="faction_quest_helios",
+        faction="helios",
+        name="Испытание Гелиоса",
+        description="Гелиос проверяет новичков делом: разберитесь с 5 событиями экспедиций.",
+        objectives=[{"type": "event_resolved", "count": 5}],
+        rewards={"quant": 300, "xp": 30, "reputation": {"helios": 500}},
+    ),
+    dict(
+        code="faction_quest_dark_cartel",
+        faction="dark_cartel",
+        name="Услуга Тёмного картеля",
+        description="Картель ценит деловых: разберитесь с 5 событиями экспедиций.",
+        objectives=[{"type": "event_resolved", "count": 5}],
+        rewards={"quant": 300, "xp": 30, "reputation": {"dark_cartel": 500}},
+    ),
+    dict(
+        code="faction_quest_veil_keepers",
+        faction="veil_keepers",
+        name="Служба Хранителей завесы",
+        description="Хранители ищут союзников: разберитесь с 5 событиями экспедиций.",
+        objectives=[{"type": "event_resolved", "count": 5}],
+        rewards={"quant": 300, "xp": 30, "reputation": {"veil_keepers": 500}},
+    ),
+    dict(
+        code="faction_quest_red_syndicate",
+        faction="red_syndicate",
+        name="Контракт Красного синдиката",
+        description="Синдикат платит за результат: победите 2 противников.",
+        objectives=[{"type": "battle_won", "count": 2}],
+        rewards={"quant": 300, "xp": 30, "reputation": {"red_syndicate": 500}},
+    ),
+]
+
 # --- Заглушки рецептов крафта ---
 RECIPES: list[dict[str, Any]] = [
     dict(
@@ -609,6 +653,45 @@ async def ensure_seeds(session: AsyncSession) -> dict[str, int]:
             row = await session.scalar(sa.select(Faction).where(Faction.code == spec["code"]))
             assert row is not None
             faction_rows[spec["code"]] = row
+
+    # базовый шаблон события-посланника (draft: в очередь событий не входит,
+    # снапшот собирается динамически под случайную фракцию)
+    from app.models_game import EventTemplate as _ET
+
+    if await session.scalar(sa.select(_ET).where(_ET.code == "faction_quest_offer")) is None:
+        session.add(
+            _ET(
+                code="faction_quest_offer",
+                name="Посланник фракции",
+                description="К вам на связь выходит представитель фракции.",
+                kind="interactive",
+                fuel_cost=0,
+                danger_min=1,
+                danger_max=1,
+                can_refuse=True,
+                script={},
+                status="draft",
+            )
+        )
+
+    # фракционные квесты-предложения (вне цепочки обучения)
+    from app.models_game import QuestTemplate as _QT
+
+    for idx, spec in enumerate(FACTION_QUESTS):
+        existing = await session.scalar(sa.select(_QT).where(_QT.code == spec["code"]))
+        if existing is None:
+            session.add(
+                _QT(
+                    code=spec["code"],
+                    name=spec["name"],
+                    description=spec["description"],
+                    kind="faction",
+                    chain_order=100 + idx,  # вне цепочки tutorial/story
+                    faction_id=faction_rows[spec["faction"]].id,
+                    objectives=spec["objectives"],
+                    rewards=spec["rewards"],
+                )
+            )
 
     existing_ships = set((await session.scalars(sa.select(ShipTemplate.code))).all())
     for spec in FACTIONS:

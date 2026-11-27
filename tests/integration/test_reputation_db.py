@@ -5,7 +5,7 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from app import battles, characters, reputation
+from app import battles, characters, expeditions, reputation
 from app.models_game import Character, Faction, Reputation, Ship
 from core.errors import DomainError
 from tests.conftest import requires_db
@@ -25,6 +25,138 @@ async def _rep(session, character, faction_code: str) -> int | None:
     assert faction is not None
     row = await session.get(Reputation, (character.id, faction.id))
     return row.value if row else None
+
+
+@requires_db
+async def test_faction_quest_offer_flow(session, seeded):
+    """Посланник нейтральной фракции: 100% шанс (config) → предложение; принятие
+    активирует квест; выполнение даёт награду и репутацию с фракцией."""
+    from app.models_game import CharacterQuest, QuestTemplate
+
+    character = await _character(session, seeded)
+    # форсируем появление посланника
+    from app.models import ConfigParam
+
+    param = await session.get(ConfigParam, "expedition.faction_quest_chance_pct")
+    if param is None:
+        session.add(ConfigParam(key="expedition.faction_quest_chance_pct", value=100))
+    else:
+        param.value = 100
+    await session.flush()
+
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.fuel = 50
+    await session.flush()
+    expedition = await expeditions.launch_expedition(session, character)
+    await expeditions.proceed(session, character, rng=random.Random(1))
+    from datetime import UTC, datetime, timedelta
+
+    await session.refresh(expedition)
+    expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session.flush()
+    await expeditions.arrive_event(
+        session, {"expedition_id": str(expedition.id)}, rng=random.Random(1)
+    )
+    offered = await expeditions._current_offered_event(session, expedition)
+    assert offered is not None
+    assert offered.snapshot["code"] == "faction_quest_offer"
+    assert "Посланник" in offered.snapshot["name"]
+
+    # принимаем
+    await expeditions.resolve_choice(session, character, "accept", rng=random.Random(1))
+    active = (
+        await session.execute(
+            sa.select(QuestTemplate)
+            .join(CharacterQuest, CharacterQuest.quest_id == QuestTemplate.id)
+            .where(
+                CharacterQuest.character_id == character.id,
+                CharacterQuest.status == "active",
+                QuestTemplate.kind == "faction",
+            )
+        )
+    ).scalar_one_or_none()
+    assert active is not None
+    assert character.tracked_quest == active.code
+    faction = await session.get(Faction, active.faction_id)
+    assert faction is not None and faction.kind == "neutral"
+
+    # выполняем цель квеста напрямую через track и проверяем награды
+    from app import quests as quests_mod
+
+    goal = active.objectives[0]
+    for _ in range(int(goal.get("count", 1))):
+        await quests_mod.track(session, character, str(goal["type"]))
+    state = await session.scalar(
+        sa.select(CharacterQuest).where(
+            CharacterQuest.character_id == character.id,
+            CharacterQuest.quest_id == active.id,
+        )
+    )
+    assert state is not None and state.status == "completed"
+    # репутация из наград начислена своей фракции квеста
+    rep = await _rep(session, character, faction.code)
+    assert rep == 500
+
+
+@requires_db
+async def test_chain_quest_grants_own_faction_reputation(session, seeded):
+    """Задания цепочки (Штаб) улучшают репутацию со своей фракцией (+250)."""
+    from app import quests as quests_mod
+
+    character = await _character(session, seeded, faction="helion")
+    await quests_mod.accept_quest(session, character, "tutorial_1")
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.fuel = 50
+    await session.flush()
+    await expeditions.launch_expedition(session, character)  # цель tutorial_1
+    assert await _rep(session, character, "helion") == 250  # quests.own_faction_rep
+
+
+@requires_db
+async def test_admin_enemy_editor(session, seeded):
+    """Редактор врагов: создание с фракцией/репутацией, правка, защита от удаления."""
+    from app import admin
+    from app.models_game import AdminUser
+
+    owner = await session.scalar(sa.select(AdminUser).where(AdminUser.login == "owner"))
+    assert owner is not None
+
+    created = await admin.create_content(session, owner, "enemy", {
+        "code": "test_marauder", "name": "Тестовый мародёр", "category": "dangerous",
+        "faction": "red_syndicate",
+        "stats": {"hull": 60, "damage": 10, "xp": 25},
+        "reputation": {"red_syndicate": -40},
+    })
+    assert created["faction"] == "red_syndicate"
+    assert created["reputation"]["red_syndicate"] == -40
+
+    updated = await admin.update_content(session, owner, "enemy", "test_marauder", {
+        "name": "Мародёр v2", "category": "elite", "faction": "pirates",
+        "stats": {"hull": 80, "damage": 12, "xp": 30},
+        "reputation": {"pirates": -60},
+    })
+    assert updated["category"] == "elite" and updated["faction"] == "pirates"
+
+    # валидация: кривая категория и stats без hull
+    for bad in (
+        {"name": "X", "category": "godlike", "stats": {"hull": 1, "damage": 1}},
+        {"name": "X", "category": "normal", "stats": {"damage": 1}},
+    ):
+        with pytest.raises(DomainError):
+            await admin.create_content(session, owner, "enemy", {"code": "bad_e", **bad})
+
+    # свободный враг удаляется
+    result = await admin.delete_content(session, owner, "enemy", "test_marauder")
+    assert result["mode"] == "hard"
+
+    # враг, участвовавший в боях, — защищён от удаления
+    fighter = await _character(session, seeded)
+    await battles.start_battle(session, fighter, enemy_code="pirate_scout")
+    with pytest.raises(DomainError) as exc_info:
+        await admin.delete_content(session, owner, "enemy", "pirate_scout")
+    assert exc_info.value.code == "bad_content" and "боях" in exc_info.value.message
 
 
 @requires_db

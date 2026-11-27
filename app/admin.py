@@ -26,6 +26,7 @@ from app.models_game import (
     CharacterEffect,
     CharacterQuest,
     EffectTemplate,
+    EnemyTemplate,
     EventTemplate,
     Expedition,
     Faction,
@@ -426,13 +427,26 @@ CONTENT_KINDS: dict[str, Any] = {
     "recipe": RecipeTemplate,
     "ship": ShipTemplate,
     "faction": Faction,
+    "enemy": EnemyTemplate,
 }
 _CONTENT_STATUSES = ("draft", "published", "archived")
-_QUEST_KINDS = ("tutorial", "story")
+_QUEST_KINDS = ("tutorial", "story", "faction")
 _EVENT_KINDS = ("automatic", "interactive")
 
 
 def _content_to_dict(kind: str, row: Any, *, faction_code: str = "") -> dict[str, Any]:
+    if kind == "enemy":  # у врагов нет статуса публикации
+        return {
+            "code": row.code,
+            "name": row.name,
+            "category": row.category,
+            "faction": faction_code,
+            "stats": row.stats or {},
+            "reputation": row.reputation or {},
+            "abilities": row.abilities or [],
+            "passives": row.passives or {},
+            "weaknesses": row.weaknesses or {},
+        }
     if kind == "faction":  # у фракций нет статуса публикации
         return {
             "code": row.code,
@@ -502,7 +516,7 @@ async def list_content(session: AsyncSession, admin: AdminUser) -> dict[str, Any
     }
     for kind, model in CONTENT_KINDS.items():
         rows = (await session.scalars(sa.select(model).order_by(model.code))).all()
-        if kind == "ship":
+        if kind in ("ship", "enemy"):
             result[kind + "s"] = [
                 _content_to_dict(kind, row, faction_code=faction_codes.get(row.faction_id, ""))
                 for row in rows
@@ -523,7 +537,7 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
     if not name:
         errors.append("название обязательно")
     fields: dict[str, Any] = {"code": code, "name": name}
-    if kind not in ("ship", "faction"):  # у кораблей и фракций нет статуса
+    if kind not in ("ship", "faction", "enemy"):  # нет статуса публикации
         status = str(data.get("status", "published")).strip()
         if status not in _CONTENT_STATUSES:
             errors.append(f"статус: {'|'.join(_CONTENT_STATUSES)}")
@@ -583,6 +597,32 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
             "chain_order": _int("chain_order", 0, 0, 1000),
             "objectives": objectives,
             "rewards": _json("rewards", {}, dict),
+        }
+    elif kind == "enemy":
+        ecat = str(data.get("category", "normal")).strip()
+        if ecat not in ("normal", "dangerous", "elite", "boss"):
+            errors.append("категория: normal|dangerous|elite|boss")
+        stats = _json("stats", {}, dict)
+        for field in ("hull", "damage"):
+            try:
+                if int(stats.get(field, 0)) < 1:
+                    errors.append(f"stats.{field}: целое число от 1")
+            except (TypeError, ValueError):
+                errors.append(f"stats.{field}: целое число от 1")
+        reputation = _json("reputation", {}, dict)
+        for code_, delta in reputation.items():
+            try:
+                int(delta)
+            except (TypeError, ValueError):
+                errors.append(f"reputation.{code_}: целое число")
+        fields |= {
+            "faction": str(data.get("faction", "")).strip(),  # код; в id — при записи
+            "category": ecat,
+            "stats": stats,
+            "reputation": reputation,
+            "abilities": _json("abilities", [], list),
+            "passives": _json("passives", {}, dict),
+            "weaknesses": _json("weaknesses", {}, dict),
         }
     elif kind == "faction":
         fkind = str(data.get("kind", "neutral")).strip()
@@ -651,8 +691,10 @@ async def create_content(
     fields = _validate_content(kind, data, create=True)
     if kind == "recipe":
         await _validate_recipe_result(session, fields)
-    faction_code = str(fields.pop("faction", "") or "") if kind == "ship" else ""
-    if kind == "ship":
+    faction_code = (
+        str(fields.pop("faction", "") or "") if kind in ("ship", "enemy") else ""
+    )
+    if kind in ("ship", "enemy"):
         fields["faction_id"] = await _resolve_faction(session, faction_code)
     if await session.scalar(sa.select(model).where(model.code == fields["code"])) is not None:
         raise DomainError(
@@ -696,8 +738,10 @@ async def update_content(
     fields = _validate_content(kind, {**data, "code": code}, create=False)
     if kind == "recipe":
         await _validate_recipe_result(session, fields)
-    faction_code = str(fields.pop("faction", "") or "") if kind == "ship" else ""
-    if kind == "ship":
+    faction_code = (
+        str(fields.pop("faction", "") or "") if kind in ("ship", "enemy") else ""
+    )
+    if kind in ("ship", "enemy"):
         fields["faction_id"] = await _resolve_faction(session, faction_code)
     before = _content_to_dict(kind, row)
     for key, value in fields.items():
@@ -752,6 +796,22 @@ async def delete_content(
                 "bad_content",
                 "Ошибка: фракция используется "
                 f"(игроков: {players}, врагов: {enemies}) — удаление невозможно.",
+            )
+    if kind == "enemy":
+        from app.models_game import Battle as _Battle
+
+        fights = int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(_Battle).where(
+                    _Battle.enemy_template_id == row.id
+                )
+            )
+            or 0
+        )
+        if fights:
+            raise DomainError(
+                "bad_content",
+                f"Ошибка: враг участвовал в боях ({fights}) — удаление невозможно.",
             )
     if kind == "ship":
         # Ship.template_id → RESTRICT: корабль игрока не даёт удалить шаблон,
@@ -824,6 +884,7 @@ CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int 
         ("defeat.malfunctions", "Поломки при поражении", "int", 0, 100),
         ("defeat.loss_min_pct", "Потеря добычи при поражении: от, %", "int", 0, 100),
         ("defeat.loss_max_pct", "Потеря добычи при поражении: до, %", "int", 0, 100),
+        ("expedition.faction_quest_chance_pct", "Шанс посланника нейтральной фракции, %", "int", 0, 100),
         ("danger.low_max", "Опасность «низкая»: до", "int", 1, 10),
         ("danger.high_min", "Опасность «высокая»: от", "int", 1, 10),
     ]),
@@ -833,6 +894,7 @@ CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int 
         ("reputation.hatred_below", "Ненависть: репутация ниже", "int", -1000000, 0),
         ("reputation.friendly_from", "Дружелюбие: репутация от", "int", 0, 1000000),
         ("reputation.exalted_from", "Превознесение: репутация от", "int", 0, 10000000),
+        ("quests.own_faction_rep", "Репутация со своей фракцией за задание цепочки", "int", 0, 100000),
     ]),
     "workshop": ("Мастерская", [
         ("workshop.refuel_price_quant", "Цена заправки, Квантов", "int", 0, 1000000),
