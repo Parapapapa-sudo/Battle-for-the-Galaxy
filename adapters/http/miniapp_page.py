@@ -52,6 +52,7 @@ PAGE = """<!doctype html>
 @font-face {
   font-family: "Arounder";
   src: url("/fonts/Arounder.woff2") format("woff2"),
+       url("/fonts/Arounder.otf") format("opentype"),
        url("/fonts/Arounder.ttf") format("truetype");
   font-display: swap;
 }
