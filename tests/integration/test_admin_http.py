@@ -97,6 +97,76 @@ async def test_admin_api_content_publish(http_seeded):
 
 
 @requires_db
+async def test_miniapp_sections_api(http_seeded):
+    """Разделы мини-аппа: карточка предмета, оснащение, магазин, журнал, статистика, действия."""
+    from app import characters
+    from app.models_game import AccountIdentity
+
+    char_id = uuid.uuid4()
+    vk_user = f"998{uuid.uuid4().int % 10**9}"
+    async with session_factory() as s, s.begin():
+        account = Account()
+        s.add(account)
+        await s.flush()
+        s.add(
+            AccountIdentity(
+                account_id=account.id, platform="vk", platform_user_id=vk_user
+            )
+        )
+        char = await characters.create_character(
+            s, account_id=account.id, name=f"Мини{uuid.uuid4().hex[:6]}",
+            faction_code="azimuth",
+        )
+        char_id = char.id
+    try:
+        async with await _client() as client:
+            h = {"X-Character-Id": str(char_id)}
+
+            r = await client.get("/api/items/scrap_metal", headers=h)
+            assert r.status_code == 200
+            d = r.json()
+            assert d["name"] == "Металлолом" and d["owned"] >= 10
+            assert d["category"] == "resource" and d["actions"] == []
+
+            r = await client.get("/api/items/nano_patch", headers=h)
+            assert any(a["cmd"] == "use nano_patch" for a in r.json()["actions"])
+
+            r = await client.get("/api/items/no_such_item", headers=h)
+            assert r.status_code == 404
+
+            r = await client.get("/api/equipment", headers=h)
+            assert r.status_code == 200
+            assert {"ship_slots", "crew_skills", "storage"} <= set(r.json())
+
+            r = await client.get("/api/shop", headers=h)
+            titles = [o["title"] for o in r.json()["offers"]]
+            assert any("100 Эонов за 100 ₽" in t for t in titles)
+            assert any("Подписка на 7 дн." in t for t in titles)
+
+            r = await client.get("/api/journal", headers=h)
+            j = r.json()
+            assert any(q["name"] == "Первый вылет" for q in j["quests"])
+            assert "achievements" in j and "reputation" in j
+
+            r = await client.get("/api/stats", headers=h)
+            st = r.json()
+            assert st["faction"] == "Вольная Лига" and st["expeditions_total"] == 0
+
+            # действие из мини-аппа идёт через игровой конвейер команд
+            r = await client.post("/api/action", json={"cmd": "me"}, headers=h)
+            assert r.status_code == 200 and "👤" in r.json()["message"]
+    finally:
+        async with session_factory() as s, s.begin():
+            await s.execute(
+                sa.delete(Account).where(
+                    Account.id.in_(
+                        sa.select(Character.account_id).where(Character.id == char_id)
+                    )
+                )
+            )
+
+
+@requires_db
 async def test_miniapp_vk_launch_params_auto_account(http_seeded):
     """Мини-апп: валидная подпись VK → аккаунт создаётся сам; без персонажа — 404 с подсказкой."""
     import base64

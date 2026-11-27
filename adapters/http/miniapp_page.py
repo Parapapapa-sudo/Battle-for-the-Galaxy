@@ -2,6 +2,7 @@
 
 Раздаётся с того же сервера, что и API — launch params из URL iframe
 пересылаются в заголовке X-VK-Launch-Params (верификация подписи на сервере).
+Шапка-разделы: Корабль (инфо/инвентарь/оснащение), Магазин, Журнал, Статистика.
 """
 
 from fastapi import APIRouter
@@ -19,92 +20,266 @@ PAGE = """<!doctype html>
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: #0b1020; color: #e7ecf5; min-height: 100vh; padding: 16px;
-}
-h1 { font-size: 20px; margin-bottom: 4px; }
-.sub { color: #8b96ad; font-size: 13px; margin-bottom: 16px; }
-.card {
-  background: #141b31; border: 1px solid #232c4d; border-radius: 12px;
-  padding: 14px; margin-bottom: 12px;
-}
-.card h2 { font-size: 14px; color: #9fb4ff; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #0b1020; color: #e7ecf5; min-height: 100vh; }
+header { position: sticky; top: 0; z-index: 5; background: #101736;
+  border-bottom: 1px solid #232c4d; padding: 10px 12px 0; }
+.htitle { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+.htitle span { color: #8b96ad; font-weight: 400; font-size: 12px; margin-left: 8px; }
+nav { display: flex; gap: 4px; }
+nav button { flex: 1; background: none; border: none; color: #8b96ad; font-size: 12px;
+  padding: 8px 2px 10px; cursor: pointer; border-bottom: 2px solid transparent; }
+nav button.active { color: #9fb4ff; border-bottom-color: #4d7cff; }
+nav button .ico { display: block; font-size: 18px; margin-bottom: 2px; }
+main { padding: 14px; max-width: 640px; margin: 0 auto; }
+.subtabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.subtabs button { flex: 1; background: #141b31; border: 1px solid #232c4d; color: #8b96ad;
+  border-radius: 8px; padding: 8px 4px; font-size: 12px; cursor: pointer; }
+.subtabs button.active { background: #182142; color: #9fb4ff; border-color: #4d7cff; }
+.card { background: #141b31; border: 1px solid #232c4d; border-radius: 12px;
+  padding: 14px; margin-bottom: 12px; }
+.card h2 { font-size: 13px; color: #9fb4ff; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
 .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .row span:last-child { color: #cdd7ee; }
-.bar { height: 6px; background: #232c4d; border-radius: 3px; overflow: hidden; margin-top: 4px; }
-.bar > div { height: 100%; background: linear-gradient(90deg,#4d7cff,#9b5bff); }
-.item { display: flex; justify-content: space-between; font-size: 14px; padding: 5px 0; border-bottom: 1px dashed #1d2745; }
-.item:last-child { border-bottom: none; }
-.qty { color: #9fb4ff; }
-.status-exp { color: #ffd479; }
+.grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.slot { aspect-ratio: 1; background: #0d1330; border: 1px solid #232c4d; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; position: relative;
+  font-size: 26px; cursor: pointer; }
+.slot:active { border-color: #4d7cff; }
+.slot .qty { position: absolute; right: 4px; bottom: 2px; font-size: 11px; color: #fff;
+  background: #4d7cff; border-radius: 8px; padding: 0 5px; font-weight: 700; }
+.slot.empty { cursor: default; opacity: .35; font-size: 18px; }
+.slot .lvl { position: absolute; left: 4px; top: 2px; font-size: 10px; color: #ffd479; }
+.bigicon { font-size: 56px; text-align: center; padding: 10px 0 4px; }
+.iname { text-align: center; font-size: 18px; font-weight: 700; }
+.rarity { text-align: center; font-size: 12px; margin-bottom: 8px; }
+.rar-common { color: #8b96ad; } .rar-rare { color: #6db3ff; }
+.rar-epic { color: #c07aff; } .rar-unique { color: #ffd479; }
+.desc { color: #aeb8d0; font-size: 13px; text-align: center; margin-bottom: 8px; }
+.chip { display: inline-block; background: #223; border: 1px solid #35406e; border-radius: 12px;
+  font-size: 11px; padding: 2px 8px; margin: 2px; color: #cdd7ee; }
+.chips { text-align: center; margin-bottom: 6px; }
+.btn { display: block; width: 100%; padding: 12px; margin-top: 8px; border: none; border-radius: 10px;
+  background: linear-gradient(90deg,#4d7cff,#9b5bff); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+.btn.ghost { background: #1b2444; border: 1px solid #2a3560; }
+.back { background: none; border: none; color: #9fb4ff; font-size: 14px; cursor: pointer; padding: 4px 0 10px; }
+.note { color: #8b96ad; font-size: 12px; margin-top: 6px; }
 .err { color: #ff7a7a; font-size: 14px; }
-.refresh { margin-top: 8px; width: 100%; padding: 12px; border: none; border-radius: 10px;
-  background: linear-gradient(90deg,#4d7cff,#9b5bff); color: #fff; font-size: 15px; font-weight: 600; }
+.toast { background: #0d1330; border: 1px solid #2f6f4f; border-radius: 8px; padding: 10px;
+  font-size: 13px; white-space: pre-wrap; margin-bottom: 12px; }
+.quest { border-bottom: 1px dashed #1d2745; padding: 8px 0; }
+.quest:last-child { border-bottom: none; }
+.quest .qn { font-size: 14px; font-weight: 600; }
+.quest .qd { font-size: 12px; color: #8b96ad; margin: 2px 0; }
+.quest .qp { font-size: 12px; color: #9fb4ff; }
+.badge { font-size: 10px; padding: 1px 7px; border-radius: 10px; margin-left: 6px; }
+.badge.avail { background: #2f6f4f; color: #d7ffe7; }
 </style>
 </head>
 <body>
-<h1>Battle for the Galaxy</h1>
-<div class="sub" id="sub">загрузка…</div>
-<div id="content"></div>
-<button class="refresh" onclick="loadAll()">Обновить</button>
+<header>
+  <div class="htitle">Battle for the Galaxy<span id="who"></span></div>
+  <nav id="nav"></nav>
+</header>
+<main id="content"><div class="card">Загрузка…</div></main>
 
 <script>
 const LP = location.search.replace(/^[?]/, "");
-const H = { "X-VK-Launch-Params": LP };
+const H = { "X-VK-Launch-Params": LP, "Content-Type": "application/json" };
 if (typeof vkBridge !== "undefined") { vkBridge.send("VKWebAppInit"); }
 
-async function api(path) {
-  const r = await fetch(path, { headers: H });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ("HTTP " + r.status));
-  return r.json();
-}
+const SECTIONS = [
+  ["ship", "🚀", "Корабль"],
+  ["shop", "🛒", "Магазин"],
+  ["journal", "📜", "Журнал"],
+  ["stats", "📊", "Статистика"],
+];
+const SHIP_TABS = [["info", "Общая информация"], ["inv", "Инвентарь"], ["equip", "Оснащение"]];
+const ICONS = { resource: "⛏️", consumable: "💊", module: "🔩", repair_kit: "🧰", special: "💎" };
+const RAR = { common: "обычный", rare: "редкий", epic: "эпический", unique: "уникальный" };
+let SECTION = "ship", SHIP_TAB = "info", TOAST = "";
 
-function card(title, rowsHtml) {
-  return `<div class="card"><h2>${title}</h2>${rowsHtml}</div>`;
-}
-function row(k, v) { return `<div class="row"><span>${k}</span><span>${v}</span></div>`; }
+const $c = () => document.getElementById("content");
+const icon = (cat) => ICONS[cat] || "📦";
 
-async function loadAll() {
-  const c = document.getElementById("content");
+async function api(path, opts) {
+  const r = await fetch(path, { headers: H, ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || ("HTTP " + r.status));
+  return data;
+}
+async function act(cmd) {
   try {
-    const me = await api("/api/me");
-    document.getElementById("sub").textContent = me.name + " · пул опыта: " + me.xp_pool;
-    let html = "";
-    if (me.ship) {
-      const s = me.ship;
-      html += card("Корабль",
-        row("Прочность", s.hull + (s.malfunctions ? " (поломки: " + s.malfunctions + ")" : "")) +
-        row("Топливо", s.fuel) +
-        row("Статус", s.status === "dock" ? "космопорт" : s.status === "expedition" ? "экспедиция" : s.status === "returning" ? '<span class="status-exp">возвращение</span>' : s.status));
-    }
-    if (me.expedition) {
-      html += card("Экспедиция", row("Глубина", me.expedition.depth) + row("Статус", me.expedition.status));
-    }
-    c.innerHTML = html;
-    const inv = await api("/api/inventory?kind=ship");
-    c.innerHTML += card("Инвентарь (" + inv.items.length + (inv.size_limit ? "/" + inv.size_limit : "") + ")",
-      inv.items.map(i => `<div class="item"><span>${i.name}</span><span class="qty">×${i.qty}</span></div>`).join("") || row("", "пусто"));
-    const mods = await api("/api/mods");
-    c.innerHTML += card("Модули",
-      mods.modules.map(m => `<div class="item"><span>${m.name} (ур. ${m.level})</span><span class="qty">${m.installed ? "слот " + m.slot : "в инвентаре"}</span></div>`).join("") || row("", "нет модулей"));
-    const q = await api("/api/quests");
-    if (q.quests.length) {
-      c.innerHTML += card("Задания", q.quests.map(quest =>
-        `<div class="item"><span>${quest.name}</span><span class="qty">${quest.progress.map(p => p.have + "/" + p.need).join(", ")}</span></div>`
-      ).join(""));
-    }
-    if (q.faction_events.length) {
-      c.innerHTML += card("Фракционные события", q.faction_events.map(e =>
-        `<div class="item"><span>${e.name}</span><span class="qty">${e.progress}/${e.goal}</span></div>`
-      ).join(""));
-    }
+    const r = await api("/api/action", { method: "POST", body: JSON.stringify({ cmd }) });
+    TOAST = r.message;
+  } catch (e) { TOAST = "Ошибка: " + e.message; }
+  render();
+}
+
+function renderNav() {
+  document.getElementById("nav").innerHTML = SECTIONS.map(([id, ico, label]) =>
+    `<button class="${SECTION === id ? "active" : ""}" onclick="go('${id}')">
+       <span class="ico">${ico}</span>${label}</button>`).join("");
+}
+function go(section) { SECTION = section; SHIP_TAB = "info"; TOAST = ""; render(); }
+function goShipTab(tab) { SHIP_TAB = tab; TOAST = ""; render(); }
+function toast() { return TOAST ? `<div class="toast">${TOAST}</div>` : ""; }
+function row(k, v) { return `<div class="row"><span>${k}</span><span>${v}</span></div>`; }
+function card(title, html) { return `<div class="card"><h2>${title}</h2>${html}</div>`; }
+
+// --- Корабль: общая информация -------------------------------------------------
+async function viewShipInfo() {
+  const me = await api("/api/me");
+  document.getElementById("who").textContent = me.name;
+  let html = "";
+  if (me.ship) {
+    const s = me.ship;
+    const status = { dock: "космопорт", expedition: "экспедиция", returning: "возвращение", battle: "бой" }[s.status] || s.status;
+    html += card("🚀 Корабль",
+      row("Прочность", s.hull) + row("Поломки", s.malfunctions) +
+      row("Топливо", s.fuel) + row("Статус", status));
+  }
+  if (me.expedition) {
+    html += card("🛰 Экспедиция", row("Глубина", me.expedition.depth) + row("Статус", me.expedition.status));
+  }
+  html += card("✨ Прогресс", row("Пул опыта", me.xp_pool) + row("Инвентарь (слотов)", me.inventory_size));
+  return html;
+}
+
+// --- Корабль: инвентарь (слоты) -------------------------------------------------
+async function viewInventory() {
+  const inv = await api("/api/inventory?kind=ship");
+  const total = inv.size_limit || inv.items.length;
+  let cells = inv.items.map(i =>
+    `<div class="slot" onclick="openItem('${i.code}')" title="${i.name}">
+       ${icon(i.category)}<span class="qty">${i.qty}</span></div>`).join("");
+  for (let k = inv.items.length; k < Math.min(total, Math.max(10, inv.items.length)); k++) {
+    cells += `<div class="slot empty">·</div>`;
+  }
+  return card(`📦 Инвентарь (${inv.items.length}/${inv.size_limit || "∞"})`, `<div class="grid">${cells}</div>`)
+    + `<div class="note">Нажмите на предмет, чтобы открыть его карточку.</div>`;
+}
+
+// --- Корабль: оснащение ---------------------------------------------------------
+async function viewEquipment() {
+  const eq = await api("/api/equipment");
+  const cell = (m) =>
+    `<div class="slot" onclick="openItem('${m.code}')" title="${m.name}">
+       ${m.kind === "ability" ? "⚡" : "🔩"}<span class="lvl">ур.${m.level}</span></div>`;
+  const grid = (list, emptyText) => list.length
+    ? `<div class="grid">${list.map(cell).join("")}</div>`
+    : `<div class="note">${emptyText}</div>`;
+  return card("🛠 Оснащение корабля", grid(eq.ship_slots, "Нет установленных модулей."))
+    + card("👥 Команда (навыки)", grid(eq.crew_skills, "Навыков пока нет — установите модули способностей."))
+    + (eq.storage.length ? card("🎒 Модули на складе (в инвентаре)", grid(eq.storage, "")) : "")
+    + `<div class="note">Нажмите на модуль, чтобы открыть карточку: снять, прокачать.</div>`;
+}
+
+// --- Карточка предмета / товара (универсальная) ---------------------------------
+async function openItem(code) {
+  const it = await api("/api/items/" + encodeURIComponent(code));
+  let chips = `<span class="chip">${RAR[it.rarity] || it.rarity}</span>`;
+  if (it.is_unique) chips += `<span class="chip">уникальный</span>`;
+  if (!it.tradable) chips += `<span class="chip">персональный</span>`;
+  if (!it.sellable) chips += `<span class="chip">не продаётся</span>`;
+  chips += `<span class="chip">стек до ${it.stack_limit}</span>`;
+  let html = `<button class="back" onclick="render()">← Назад</button>` + toast();
+  html += `<div class="card"><div class="bigicon">${it.module ? (it.category === "module" && it.module.installed ? "🔩" : icon(it.category)) : icon(it.category)}</div>
+    <div class="iname">${it.name}</div>
+    <div class="rarity rar-${it.rarity}">${RAR[it.rarity] || it.rarity}</div>
+    <div class="desc">${it.description || ""}</div>
+    <div class="chips">${chips}</div>
+    ${row("У вас", it.owned + " шт.")}
+    ${it.module ? row("Уровень модуля", it.module.level + " (" + it.module.xp + " опыта)") : ""}
+    ${it.module ? row("Состояние", it.module.installed ? "установлен" : "в инвентаре") : ""}
+  </div>`;
+  html += card("⚖️ Аукцион", `<div class="note">Лоты по этому предмету появятся здесь. Пока аукцион доступен в чате (команды lots / sell).</div>`);
+  if (it.actions.length) {
+    html += card("Действия", it.actions.map(a =>
+      `<button class="btn" onclick="act('${a.cmd.replace(/'/g, "")}')">${a.label}</button>`).join(""));
+  }
+  $c().innerHTML = html;
+}
+
+// --- Магазин --------------------------------------------------------------------
+async function viewShop() {
+  const shop = await api("/api/shop");
+  const cells = shop.offers.map(o => {
+    const ic = o.kind === "pack" ? "💎" : "⭐";
+    const price = o.kind === "pack" ? o.price_rub + " ₽" : o.price_eon + " Эонов";
+    return `<div class="slot" style="aspect-ratio:auto;padding:10px 4px;flex-direction:column;gap:4px"
+      onclick="openOffer('${o.code}','${o.title}','${ic}','${price}','${o.kind}')">
+      <div style="font-size:26px">${ic}</div>
+      <div style="font-size:11px;text-align:center">${o.title}</div>
+      <div style="font-size:11px;color:#9fb4ff">${price}</div></div>`;
+  }).join("");
+  return card("💎 Магазин", `<div class="grid" style="grid-template-columns:repeat(3,1fr)">${cells}</div>`)
+    + `<div class="note">Эоны ↔ Кванты также обмениваются на внутреннем аукционе (команда market в чате).
+       Паки Эонов оплачиваются в рублях, подписки — за Эоны.</div>`;
+}
+function openOffer(code, title, ic, price, kind) {
+  $c().innerHTML = `<button class="back" onclick="render()">← Назад</button>` + toast()
+    + `<div class="card"><div class="bigicon">${ic}</div>
+       <div class="iname">${title}</div>
+       <div class="rarity" style="color:#9fb4ff">${price}</div>
+       <div class="desc">${kind === "pack"
+         ? "Пак Эонов. После оплаты Эоны начислятся автоматически. Эоны можно обменять на Кванты на аукционе."
+         : "Подписка: расширенный инвентарь и дополнительный слот крафта."}</div></div>`
+    + card("Действия", `<button class="btn" onclick="act('buy ${code}')">Купить</button>`);
+}
+
+// --- Журнал ----------------------------------------------------------------------
+async function viewJournal() {
+  const j = await api("/api/journal");
+  const quests = j.quests.length
+    ? j.quests.map(q => `<div class="quest">
+        <div class="qn">${q.name}${q.status === "available" ? '<span class="badge avail">принять в чате</span>' : ""}</div>
+        <div class="qd">${q.description}</div>
+        ${q.progress ? `<div class="qp">${q.progress}</div>` : ""}</div>`).join("")
+    : `<div class="note">Заданий нет.</div>`;
+  const ach = j.achievements.length
+    ? j.achievements.map(a => `<div class="row"><span>🏅 ${a.code}</span></div>`).join("")
+    : `<div class="note">Достижений пока нет — они появятся за подвиги в игре.</div>`;
+  const rep = j.reputation.length
+    ? j.reputation.map(r => row(r.faction, (r.value > 0 ? "+" : "") + r.value)).join("")
+    : `<div class="note">Репутация не заработана.</div>`;
+  return card("📜 Задания", quests) + card("🏅 Достижения", ach) + card("⭐ Репутация", rep);
+}
+
+// --- Статистика -------------------------------------------------------------------
+async function viewStats() {
+  const s = await api("/api/stats");
+  const winrate = s.battles_total ? Math.round(100 * s.battles_won / s.battles_total) + "%" : "—";
+  return card("👤 Капитан",
+      row("Имя", s.name) + row("Фракция", s.faction) + row("В игре с", s.created_at))
+    + card("📊 Показатели",
+      row("Боёв", s.battles_total) + row("Побед", s.battles_won + " (" + winrate + ")") +
+      row("Экспедиций", s.expeditions_total) + row("Заданий выполнено", s.quests_completed) +
+      row("Пул опыта", s.xp_pool))
+    + card("💰 Кошельки", row("💎 Эоны", s.eon) + row("🪙 Кванты", s.quant));
+}
+
+// --- роутер ----------------------------------------------------------------------
+async function render() {
+  renderNav();
+  try {
+    let html = toast();
+    if (SECTION === "ship") {
+      html += `<div class="subtabs">` + SHIP_TABS.map(([id, label]) =>
+        `<button class="${SHIP_TAB === id ? "active" : ""}" onclick="goShipTab('${id}')">${label}</button>`).join("") + `</div>`;
+      html += SHIP_TAB === "info" ? await viewShipInfo()
+        : SHIP_TAB === "inv" ? await viewInventory() : await viewEquipment();
+    } else if (SECTION === "shop") html += await viewShop();
+    else if (SECTION === "journal") html += await viewJournal();
+    else html += await viewStats();
+    $c().innerHTML = html;
   } catch (e) {
-    c.innerHTML = card("Ошибка", `<div class="err">${e.message}</div>`);
-    document.getElementById("sub").textContent = "откройте через VK Mini App";
+    $c().innerHTML = card("Ошибка", `<div class="err">${e.message}</div>
+      <button class="btn ghost" onclick="render()">Обновить</button>`);
+    document.getElementById("who").textContent = "откройте через VK Mini App";
   }
 }
-loadAll();
+render();
 </script>
 </body>
 </html>"""
