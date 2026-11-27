@@ -277,6 +277,8 @@ async def test_hall_navigation_commands(session, seeded, sessions):
         text="hall main", idempotency_key=_key(),
     )
     assert "Основной зал" in r.message
+    # «кнопка»-ссылка на мини-апп в тексте сообщения (vk_app_id настроен)
+    assert "Осмотреть корабль" in r.message and "vk.com/app54921050#ship" in r.message
     await session.refresh(character)
     assert character.hall == "main"
 

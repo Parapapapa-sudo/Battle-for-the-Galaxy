@@ -107,13 +107,11 @@ async def test_port_halls_navigation(session, seeded):
     """Залы космопорта: основной (вход после экспедиции), мастерская, штаб."""
     character = await _character(session, seeded)
 
-    # основной зал — по умолчанию; «Осмотреть корабль» открывает мини-апп
+    # основной зал — по умолчанию («Осмотреть корабль» — ссылкой в тексте, не кнопкой)
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Экспедиция", "🚀 Осмотреть корабль"], ["Мастерская", "Штаб"]]
-    inspect = kb["buttons"][0][1]["action"]
-    assert inspect.get("type") == "open_app" and inspect.get("hash") == "ship"
+    assert rows == [["Экспедиция"], ["Мастерская", "Штаб"]]
     assert not any("О игроке" in label for row in rows for label in row)
 
     # мастерская: навигация + кнопки действий с пагинацией («Далее ▶»)

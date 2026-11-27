@@ -868,7 +868,17 @@ async def cmd_hall(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     character.hall = hall
     character.hall_page = 0  # смена зала — с первой страницы кнопок
     await session.flush()
-    return CommandResult(message=t(HALL_TITLES[hall], lang), image_pack=f"port_{hall}")
+    message = t(HALL_TITLES[hall], lang)
+    if hall == "main":
+        # «кнопка»-ссылка на мини-апп прямо в тексте (кликабельный vk.com/app…)
+        from app.config import get_settings
+
+        app_id = get_settings().vk_app_id
+        if app_id:
+            message += "\n\n" + t(
+                "inspect_ship_link", lang, url=f"https://vk.com/app{app_id}#ship"
+            )
+    return CommandResult(message=message, image_pack=f"port_{hall}")
 
 
 async def cmd_page(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:

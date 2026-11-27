@@ -190,15 +190,8 @@ async def keyboard_for_character(
             hq_rows.append([("page next", t("kb_page_next", lang, n=page + 1, total=total))])
         hq_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(hq_rows, lang)
-    from app.config import get_settings
-
-    inspect_btn: Any = (
-        ("app:ship", t("kb_inspect_ship", lang))
-        if get_settings().vk_app_id
-        else ("ship", t("kb_inspect_ship", lang))  # без мини-аппа — текстовая карточка
-    )
     main_rows: list[list[Any]] = [
-        ["launch", inspect_btn],
+        ["launch"],
         [("hall workshop", t("kb_workshop", lang)), ("hall hq", t("kb_hq", lang))],
     ]
     main_rows += transfer_rows
