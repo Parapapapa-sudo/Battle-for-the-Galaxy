@@ -50,15 +50,20 @@ PAGE = """<!doctype html>
 <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
 <style>
 @font-face {
-  font-family: "Arounder";
-  src: url("/fonts/Arounder.woff2") format("woff2"),
-       url("/fonts/Arounder.otf") format("opentype"),
-       url("/fonts/Arounder.ttf") format("truetype");
-  font-display: swap;
+  font-family: "Quantix";
+  src: url("/fonts/Quantix-Regular.otf") format("opentype"),
+       url("/fonts/Quantix-Regular.ttf") format("truetype");
+  font-weight: 400; font-display: swap;
+}
+@font-face {
+  font-family: "Quantix";
+  src: url("/fonts/Quantix-ExtraBold.otf") format("opentype"),
+       url("/fonts/Quantix-ExtraBold.ttf") format("truetype");
+  font-weight: 700; font-display: swap;
 }
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Arounder", -apple-system, "Segoe UI", Roboto, sans-serif;
+body { font-family: "Quantix", -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #0b1020; color: #e7ecf5; min-height: 100vh; }
 header { position: sticky; top: 0; z-index: 5;
   background: rgba(16, 23, 54, 0.72);
@@ -142,6 +147,18 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
   font-size: 12px; color: #cdd7ee; }
 .mat.lack { color: #ff9d9d; }
 .mat img { width: 18px; height: 18px; object-fit: contain; }
+.craftgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.craftcard { display: flex; flex-direction: column; gap: 6px; padding: 12px;
+  border-radius: 14px; background: rgba(20, 27, 49, 0.42);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.craftcard .ci { font-size: 34px; text-align: center; }
+.craftcard .ci img { width: 44px; height: 44px; object-fit: contain; }
+.craftcard .cn { font-size: 13px; font-weight: 700; text-align: center; }
+.craftcard .cd { font-size: 11px; color: #8b96ad; text-align: center; }
+.craftcard .btn { padding: 9px; font-size: 13px; margin-top: 4px; }
+.catch { font-size: 13px; color: #9fb4ff; text-transform: uppercase;
+  letter-spacing: .5px; margin: 14px 0 8px; }
 </style>
 </head>
 <body>
@@ -342,23 +359,31 @@ async function viewCraft() {
       d.jobs.map(j => `<div class="quest"><div class="qn">${j.name} <span class="qp">до ${j.finishes_at}</span></div>
         <button class="btn ghost" onclick="act('craftcancel ${j.idx}')">Отменить</button></div>`).join(""));
   }
-  html += d.recipes.map(r => {
+  const CATS = [
+    ["consumable", "💊 Расходуемое"],
+    ["module", "🔩 Модули"],
+    ["repair_kit", "🧰 Ремонт"],
+    ["resource", "⛏️ Ресурсы"],
+    ["special", "💎 Особое"],
+  ];
+  const craftCard = (r) => {
     const mats = r.materials.map(m =>
       `<span class="mat ${m.have < m.need ? "lack" : ""}">${m.icon ? `<img src="${m.icon}">` : ""}${m.name} ${Math.min(m.have, m.need)}/${m.need}</span>`
     ).join("");
-    return `<div class="card">
-      <div style="display:flex;gap:12px;align-items:center">
-        <div style="font-size:34px">${r.result.icon ? `<img src="${r.result.icon}" style="width:44px;height:44px;object-fit:contain">` : "🧪"}</div>
-        <div style="flex:1">
-          <div class="qn" style="font-size:15px;font-weight:700">«${r.name}»</div>
-          <div class="note">${r.result.qty}× ${r.result.name} · ${r.duration_sec} с</div>
-        </div>
-      </div>
-      <div style="margin:8px 0">${mats}</div>
+    return `<div class="craftcard">
+      <div class="ci">${r.result.icon ? `<img src="${r.result.icon}">` : "🧪"}</div>
+      <div class="cn">«${r.name}»</div>
+      <div class="cd">${r.result.qty}× ${r.result.name} · ${r.duration_sec} с</div>
+      <div>${mats}</div>
       <button class="btn" ${r.can_craft ? "" : "disabled style='opacity:.4'"}
-        onclick="act('craft ${r.code}')">${r.can_craft ? "Создать" : "Не хватает материалов"}</button>
+        onclick="act('craft ${r.code}')">${r.can_craft ? "Создать" : "Не хватает"}</button>
     </div>`;
-  }).join("");
+  };
+  for (const [cat, title] of CATS) {
+    const list = d.recipes.filter(r => (r.result.category || "special") === cat);
+    if (!list.length) continue;
+    html += `<div class="catch">${title}</div><div class="craftgrid">${list.map(craftCard).join("")}</div>`;
+  }
   return html;
 }
 

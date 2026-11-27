@@ -50,16 +50,17 @@ async def list_recipes(session: AsyncSession, character: Character) -> list[dict
     codes = {r.result_item_code for r in recipes} | {
         str(mat["code"]) for r in recipes for mat in r.materials
     }
-    names = {
-        code: name
-        for code, name in (
-            await session.execute(
-                sa.select(ItemTemplate.code, ItemTemplate.name).where(
-                    ItemTemplate.code.in_(codes)
-                )
+    names: dict[str, str] = {}
+    categories: dict[str, str] = {}
+    for code, name, category in (
+        await session.execute(
+            sa.select(ItemTemplate.code, ItemTemplate.name, ItemTemplate.category).where(
+                ItemTemplate.code.in_(codes)
             )
-        ).all()
-    }
+        )
+    ).all():
+        names[code] = name
+        categories[code] = category
     result = []
     for recipe in recipes:
         materials = []
@@ -80,6 +81,7 @@ async def list_recipes(session: AsyncSession, character: Character) -> list[dict
                 "result": {
                     "code": recipe.result_item_code,
                     "name": names.get(recipe.result_item_code, recipe.result_item_code),
+                    "category": categories.get(recipe.result_item_code, "special"),
                     "qty": recipe.result_qty,
                 },
                 "materials": materials,
