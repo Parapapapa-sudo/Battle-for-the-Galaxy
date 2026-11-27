@@ -97,6 +97,59 @@ async def test_admin_api_content_publish(http_seeded):
 
 
 @requires_db
+async def test_miniapp_vk_launch_params_auto_account(http_seeded):
+    """Мини-апп: валидная подпись VK → аккаунт создаётся сам; без персонажа — 404 с подсказкой."""
+    import base64
+    import hashlib
+    import hmac
+    from urllib.parse import urlencode
+
+    from app.config import get_settings
+
+    secret = get_settings().vk_app_secret
+    if not secret:
+        pytest.skip("VK_APP_SECRET не задан")
+    vk_user = f"999{uuid.uuid4().int % 10**9}"
+    params = {"vk_app_id": "512000", "vk_ts": "1700000000", "vk_user_id": vk_user}
+    data = urlencode(sorted(params.items()))
+    sign = (
+        base64.urlsafe_b64encode(
+            hmac.new(secret.encode(), data.encode(), hashlib.sha256).digest()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    query = urlencode(params) + "&sign=" + sign
+    try:
+        async with await _client() as client:
+            r = await client.get("/api/me", headers={"X-VK-Launch-Params": query})
+            assert r.status_code == 404
+            assert "Персонаж ещё не создан" in r.json()["detail"]
+        # аккаунт с привязкой VK создан автоматически (не «аккаунт не привязан»)
+        async with session_factory() as s:
+            from app.models_game import AccountIdentity
+
+            identity = await s.scalar(
+                sa.select(AccountIdentity).where(
+                    AccountIdentity.platform == "vk",
+                    AccountIdentity.platform_user_id == vk_user,
+                )
+            )
+            assert identity is not None
+    finally:
+        async with session_factory() as s, s.begin():
+            await s.execute(
+                sa.delete(Account).where(
+                    Account.id.in_(
+                        sa.select(AccountIdentity.account_id).where(
+                            AccountIdentity.platform_user_id == vk_user
+                        )
+                    )
+                )
+            )
+
+
+@requires_db
 async def test_miniapp_api_me(http_seeded):
     char_id = uuid.uuid4()
     async with session_factory() as s, s.begin():

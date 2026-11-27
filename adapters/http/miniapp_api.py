@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import battles, characters, modules
 from app.config import Settings
 from app.db import session_factory, transactional
-from app.models_game import AccountIdentity, Battle, Character, Expedition, Ship
+from app.models_game import Battle, Character, Expedition, Ship
 
 router = APIRouter(prefix="/api", tags=["miniapp"])
 
@@ -42,21 +42,29 @@ async def current_character(  # noqa: B008 — Depends в аргументах (
         vk_user_id = params.get("vk_user_id") or params.get("user_id")
         if not vk_user_id:
             raise HTTPException(status_code=401, detail="нет vk_user_id в launch params")
-        identity = await session.scalar(
-            sa.select(AccountIdentity).where(
-                AccountIdentity.platform == "vk",
-                AccountIdentity.platform_user_id == str(vk_user_id),
+        # подпись валидна → пользователь настоящий: аккаунт создаём автоматически
+        # (как бот при первом сообщении), иначе мини-апп требовал «привязки» вручную
+        from app import characters as characters_app
+        from app.db import transactional
+
+        async with transactional(session):
+            account, _ = await characters_app.get_or_create_account(
+                session, platform="vk", platform_user_id=str(vk_user_id)
             )
-        )
-        if identity is None:
-            raise HTTPException(status_code=401, detail="аккаунт VK не привязан")
         character = await session.scalar(
             sa.select(Character).where(
-                Character.account_id == identity.account_id, Character.status == "active"
+                Character.account_id == account.id, Character.status == "active"
             )
         )
         if character is None:
-            raise HTTPException(status_code=404, detail="character not found")
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Персонаж ещё не создан. Напишите любое сообщение нашему "
+                    "сообществу ВКонтакте и пройдите создание персонажа — "
+                    "после этого мини-приложение откроется."
+                ),
+            )
         return character
     if settings.is_prod:
         raise HTTPException(status_code=501, detail="VK launch params auth — задайте VK_APP_SECRET")
