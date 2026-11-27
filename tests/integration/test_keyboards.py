@@ -108,7 +108,7 @@ async def test_port_halls_navigation(session, seeded):
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     assert rows == [["Экспедиция", "О игроке"], ["Мастерская", "Штаб"]]
 
-    # мастерская: навигация + кнопки крафта доступных рецептов (вместо кодов)
+    # мастерская: навигация + кнопки действий с пагинацией («Далее ▶»)
     character.hall = "workshop"
     await session.flush()
     kb = await keyboard_for_character(session, character.id)
@@ -120,20 +120,38 @@ async def test_port_halls_navigation(session, seeded):
         ["Создать «Нанопластырь»"],
         ["Создать «Ремкомплект»"],
         ["Создать «Переработка триния»"],
+        ["Установить «Разогнанное ядро»"],
+        ["Далее ▶ (1/2)"],
         ["В основной зал"],
     ]
 
-    # штаб: задания/магазин + кнопка принятия доступного задания (tutorial_1)
-    character.hall = "hq"
+    # «Далее ▶» листает страницу кнопок (команда page next)
+    character.hall_page = 1
     await session.flush()
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     assert rows == [
-        ["Задания", "Магазин"],
-        ["Принять «Первый вылет»"],
+        ["Модули", "Крафт"],
+        ["Инвентарь", "О корабле"],
+        ["+10 опыта «Разогнанное ядро»"],
+        ["Далее ▶ (2/2)"],
         ["В основной зал"],
     ]
+    character.hall_page = 0
+    await session.flush()
+
+    # штаб: задания/магазин + кнопки действий (принятие задания, покупки) с пагинацией
+    character.hall = "hq"
+    await session.flush()
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows[0] == ["Задания", "Магазин"]
+    assert rows[1] == ["Принять «Первый вылет»"]
+    assert any(label.startswith("Купить: ") for row in rows for label in row)
+    assert rows[-2][0].startswith("Далее ▶")
+    assert rows[-1] == ["В основной зал"]
 
 
 @requires_db

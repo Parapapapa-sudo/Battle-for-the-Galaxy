@@ -300,6 +300,39 @@ async def test_hall_navigation_commands(session, seeded, sessions):
 
 
 @requires_db
+async def test_page_command_turns_button_pages(session, seeded, sessions):
+    """«Далее ▶»: команда page листает страницу кнопок зала; смена зала сбрасывает."""
+    bus = CommandBus()
+    user = f"user-{uuid.uuid4().hex[:8]}"
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="start Листатель Тестов azimuth", idempotency_key=_key(),
+    )
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="hall workshop", idempotency_key=_key(),
+    )
+    r = await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="page next", idempotency_key=_key(),
+    )
+    assert "Мастерская" in r.message  # повтор экрана зала с новой страницей кнопок
+    account, _ = await characters.get_or_create_account(
+        session, platform="console", platform_user_id=user
+    )
+    character = await characters.get_active_character(session, account.id)
+    assert character is not None and character.hall_page == 1
+
+    # смена зала сбрасывает страницу
+    await route_text_command(
+        bus, sessions, platform="console", platform_user_id=user,
+        text="hall main", idempotency_key=_key(),
+    )
+    await session.refresh(character)
+    assert character.hall_page == 0
+
+
+@requires_db
 async def test_digit_button_routes_to_event_choice(session, seeded, sessions):
     """Регрессия: кнопки «1»/«2» с клавиатуры шлют боту цифру — роутер связывает
     её с вариантом активного события (иначе «Неизвестная команда: 1»)."""

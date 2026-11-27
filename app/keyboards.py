@@ -132,49 +132,120 @@ async def keyboard_for_character(
 
     # космопорт: залы (ТЗ заказчика). Основной — точка входа после экспедиции.
     hall = character.hall or "main"
+    # входящие переводы ждут подтверждения — кнопки в любом зале (редко, ≤2)
+    transfer_rows = await _pending_transfer_rows(session, character, lang)
+
     if hall == "workshop":
         ws_rows: list[list[Any]] = [
             ["mods", "recipes"],
             ["inv", "ship"],
         ]
-        # кнопки крафта вместо кодов рецептов — только то, на что хватает материалов
+        pool: list[list[Any]] = []
+        # крафт — только то, на что хватает материалов
         from app import crafting as crafting_app
 
-        for recipe in (await crafting_app.list_recipes(session, character))[:4]:
+        for recipe in await crafting_app.list_recipes(session, character):
             if recipe["can_craft"]:
-                ws_rows.append(
-                    [
-                        (
-                            f"craft {recipe['code']}",
-                            t("kb_craft_recipe", lang, name=recipe["name"]),
-                        )
-                    ]
+                pool.append(
+                    [(f"craft {recipe['code']}", t("kb_craft_recipe", lang, name=recipe["name"]))]
                 )
+        # отмена активных заказов
+        from app.models_game import RecipeTemplate
+
+        for idx, job in enumerate(await crafting_app.running_jobs(session, character), start=1):
+            job_recipe = await session.get(RecipeTemplate, job.recipe_id)
+            pool.append(
+                [
+                    (
+                        f"craftcancel {idx}",
+                        t("kb_cancel_job", lang, name=job_recipe.name if job_recipe else "?"),
+                    )
+                ]
+            )
+        # модули: установка/снятие и тренировка — кнопками, коды скрыты
+        from app import modules as modules_app
+
+        for mod in await modules_app.list_modules(session, character):
+            if mod["installed"]:
+                pool.append(
+                    [(f"uninstall {mod['code']}", t("kb_uninstall", lang, name=mod["name"]))]
+                )
+            else:
+                pool.append(
+                    [(f"install {mod['code']}", t("kb_install", lang, name=mod["name"]))]
+                )
+            pool.append(
+                [(f"train {mod['code']} 10", t("kb_train10", lang, name=mod["name"]))]
+            )
+        page_rows, page, total = _paginate(pool, character.hall_page)
+        ws_rows += transfer_rows + page_rows
+        if total > 1:
+            ws_rows.append([("page next", t("kb_page_next", lang, n=page + 1, total=total))])
         ws_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(ws_rows, lang)
     if hall == "hq":
         hq_rows: list[list[Any]] = [["quests", "shop"]]
+        pool = []
         # принятие доступных заданий и переключение отслеживания — прямо кнопками
+        from app import market as market_app
         from app import quests as quests_mod
 
-        for _state, quest in (await quests_mod.available_quests(session, character))[:3]:
-            hq_rows.append(
-                [(f"accept {quest.code}", t("kb_accept_quest", lang, name=quest.name))]
-            )
-        for _state, quest in (await quests_mod.active_quests(session, character))[:3]:
+        for _state, quest in await quests_mod.available_quests(session, character):
+            pool.append([(f"accept {quest.code}", t("kb_accept_quest", lang, name=quest.name))])
+        for _state, quest in await quests_mod.active_quests(session, character):
             if quest.code != character.tracked_quest:
-                hq_rows.append(
-                    [(f"track {quest.code}", t("kb_track_quest", lang, name=quest.name))]
-                )
+                pool.append([(f"track {quest.code}", t("kb_track_quest", lang, name=quest.name))])
+        # покупки — кнопками вместо кодов предложений
+        for offer in await market_app.list_offers(session):
+            pool.append(
+                [(f"buy {offer.code}", t("kb_buy", lang, title=market_app.offer_title(offer, lang)))]
+            )
+        page_rows, page, total = _paginate(pool, character.hall_page)
+        hq_rows += transfer_rows + page_rows
+        if total > 1:
+            hq_rows.append([("page next", t("kb_page_next", lang, n=page + 1, total=total))])
         hq_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(hq_rows, lang)
-    return vk_keyboard(
-        [
-            ["launch", "me"],
-            [("hall workshop", t("kb_workshop", lang)), ("hall hq", t("kb_hq", lang))],
-        ],
-        lang,
-    )
+    main_rows: list[list[Any]] = [
+        ["launch", "me"],
+        [("hall workshop", t("kb_workshop", lang)), ("hall hq", t("kb_hq", lang))],
+    ]
+    main_rows += transfer_rows
+    return vk_keyboard(main_rows, lang)
+
+
+# Сколько «действующих» кнопок показываем на одной странице зала
+# (с навигацией, пейджером и «В основной зал» укладываемся в лимит VK — 10 рядов)
+PAGE_SIZE = 4
+
+
+def _paginate(
+    pool: list[list[Any]], page: int
+) -> tuple[list[list[Any]], int, int]:
+    """Страницы кнопок: страница зациклена (кнопка «Далее ▶» листает по кругу)."""
+    if not pool:
+        return [], 0, 0
+    total = (len(pool) + PAGE_SIZE - 1) // PAGE_SIZE
+    page = page % total
+    return pool[page * PAGE_SIZE : (page + 1) * PAGE_SIZE], page, total
+
+
+async def _pending_transfer_rows(
+    session: AsyncSession, character: Any, lang: str
+) -> list[list[Any]]:
+    """Кнопки подтверждения входящих переводов (вместо confirm/decline <id>)."""
+    from app import economy
+
+    rows: list[list[Any]] = []
+    for transfer in (await economy.pending_transfers(session, character))[:2]:
+        short_id = transfer.id.hex[:8]
+        rows.append(
+            [
+                (f"confirm {short_id}", t("kb_accept_transfer", lang)),
+                (f"decline {short_id}", t("kb_decline_transfer", lang)),
+            ]
+        )
+    return rows
 
 
 async def keyboard_for_account(session: AsyncSession, account: Any) -> dict[str, Any]:

@@ -445,7 +445,6 @@ async def cmd_mods(session: AsyncSession, ctx: CommandContext, args: dict[str, A
                 lang,
                 kind=m["kind"],
                 name=m["name"],
-                code=m["code"],
                 level=m["level"],
                 xp=m["xp_invested"],
                 status=status,
@@ -664,6 +663,7 @@ async def cmd_inbox(session: AsyncSession, ctx: CommandContext, args: dict[str, 
                 items=sum(int(i["qty"]) for i in transfer.payload.get("items", [])),
             )
         )
+    lines.append(t("inbox_hint", lang))
     return CommandResult(message=t("inbox_title", lang) + "\n" + "\n".join(lines))
 
 
@@ -776,22 +776,13 @@ async def cmd_shop(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     if packs:
         lines = [t("shop_section_rub", lang)]
         for offer in packs:
-            lines.append(
-                t(
-                    "shop_pack_item",
-                    lang,
-                    eons=int(offer.payload.get("eons", 0)),
-                    rub=offer.price_rub,
-                    code=offer.code,
-                )
-            )
+            lines.append("— " + market.offer_title(offer, lang))
         blocks.append("\n".join(lines))
     if subs:
         lines = [t("shop_section_eon", lang)]
         for offer in subs:
-            days = market.SUB_DURATION.get(str(offer.payload.get("kind", offer.code)), "?")
             lines.append(
-                t("shop_sub_item", lang, days=days, price=offer.price_eon, code=offer.code)
+                "— " + market.offer_title(offer, lang) + t("shop_price_eon", lang, price=offer.price_eon)
             )
         blocks.append("\n".join(lines))
     blocks.append(t("shop_hint", lang))
@@ -848,8 +839,22 @@ async def cmd_hall(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     if await expeditions.get_ongoing_expedition(session, character.id) is not None:
         raise DomainError("expedition_ongoing", t("hall_in_expedition", lang))
     character.hall = hall
+    character.hall_page = 0  # смена зала — с первой страницы кнопок
     await session.flush()
     return CommandResult(message=t(HALL_TITLES[hall], lang), image_pack=f"port_{hall}")
+
+
+async def cmd_page(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """«Далее ▶» — перелистнуть страницу кнопок текущего зала (по кругу)."""
+    character = await _load(session, ctx)
+    lang = character.lang
+    if await expeditions.get_ongoing_expedition(session, character.id) is not None:
+        raise DomainError("expedition_ongoing", t("hall_in_expedition", lang))
+    direction = str(args.get("rest", "next")).strip()
+    character.hall_page = max(0, character.hall_page + (-1 if direction == "prev" else 1))
+    await session.flush()
+    hall = character.hall or "main"
+    return CommandResult(message=t(HALL_TITLES.get(hall, "hall_main"), lang))
 
 
 async def cmd_patch(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
@@ -1052,6 +1057,7 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "launch": cmd_launch,
     "вылет": cmd_launch,
     "hall": cmd_hall,
+    "page": cmd_page,
     "go": cmd_go,
     "дальше": cmd_go,
     "choice": cmd_choice,

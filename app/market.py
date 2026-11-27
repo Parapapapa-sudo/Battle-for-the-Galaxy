@@ -398,6 +398,19 @@ async def list_offers(session: AsyncSession) -> list[ShopOffer]:
     )
 
 
+def offer_title(offer: ShopOffer, lang: str = "ru") -> str:
+    """Человекочитаемое название предложения (для витрины и кнопок, без кодов)."""
+    from app.locale import t
+
+    if offer.kind == "pack":
+        return t(
+            "shop_pack_name", lang,
+            eons=int(offer.payload.get("eons", 0)), rub=offer.price_rub,
+        )
+    days = SUB_DURATION.get(str(offer.payload.get("kind", offer.code)), "?")
+    return t("shop_sub_name", lang, days=days)
+
+
 async def buy_offer(session: AsyncSession, character: Character, offer_code: str) -> Purchase:
     """Покупка за Эоны: списываем Эоны (burn — в рубли не выводятся, ТЗ), выдаём payload."""
     offer = await session.scalar(
