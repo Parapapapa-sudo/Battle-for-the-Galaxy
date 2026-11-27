@@ -265,13 +265,17 @@ async def keyboard_for_account(session: AsyncSession, account: Any) -> dict[str,
                 ]
             )
         return vk_keyboard([["intro2"]])
-    if step in ("intro2", "join"):
+    if step == "intro2":
         factions = await characters.list_factions(session)
         rows = [
             [(f"join {f.code}", f.name) for f in factions[i : i + 2]]
             for i in range(0, len(factions), 2)
         ]
         return vk_keyboard(rows)
+    if step == "join":
+        # фракция выбрана, ждём имя: список фракций НЕ показываем (выглядит
+        # как сброс выбора) — только возврат, если игрок передумал
+        return vk_keyboard([[("intro2", t("kb_back_factions"))]])
     if step == "intro":
         return vk_keyboard([["intro2"]])
     return vk_keyboard([["intro"]])

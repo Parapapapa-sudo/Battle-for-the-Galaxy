@@ -96,6 +96,11 @@ async def test_onboarding_keyboards(session, seeded):
     kb = await keyboard_for_account(session, account)
     assert _labels(kb) == ["Выбрать эту фракцию", "◀ К списку фракций"]
 
+    # фракция выбрана, ждём имя: список фракций не показываем — только возврат
+    account.onboarding = {"step": "join", "faction": "lumen"}
+    kb = await keyboard_for_account(session, account)
+    assert _labels(kb) == ["◀ К списку фракций"]
+
 
 @requires_db
 async def test_port_halls_navigation(session, seeded):
