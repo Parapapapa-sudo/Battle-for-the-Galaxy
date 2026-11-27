@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     vk_bot_token: str | None = None
     vk_group_id: int | None = None
     vk_api_version: str = "5.199"
+    vk_app_id: int | None = None  # id мини-приложения (кнопки open_app в чате)
 
     # Telegram (адаптер в планах; токен используется проверкой работоспособности)
     tg_bot_token: str | None = None

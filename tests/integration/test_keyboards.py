@@ -119,32 +119,14 @@ async def test_port_halls_navigation(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    # крафт переехал в мини-апп — в мастерской только модули (одна страница)
     assert rows == [
         ["Модули", "Крафт"],
         ["Инвентарь", "О корабле"],
-        ["Создать «Нанопластырь»"],
-        ["Создать «Ремкомплект»"],
-        ["Создать «Переработка триния»"],
         ["Установить «Разогнанное ядро»"],
-        ["Далее ▶ (1/2)"],
-        ["В основной зал"],
-    ]
-
-    # «Далее ▶» листает страницу кнопок (команда page next)
-    character.hall_page = 1
-    await session.flush()
-    kb = await keyboard_for_character(session, character.id)
-    assert kb is not None
-    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [
-        ["Модули", "Крафт"],
-        ["Инвентарь", "О корабле"],
         ["+10 опыта «Разогнанное ядро»"],
-        ["Далее ▶ (2/2)"],
         ["В основной зал"],
     ]
-    character.hall_page = 0
-    await session.flush()
 
     # штаб: задания/магазин + кнопки действий (принятие задания, покупки) с пагинацией
     character.hall = "hq"

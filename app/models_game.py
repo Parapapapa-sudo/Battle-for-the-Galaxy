@@ -540,6 +540,7 @@ class CraftJob(Base, TimestampMixin):
     recipe_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("recipe_templates.id", ondelete="RESTRICT"), nullable=False
     )
+    qty: Mapped[int] = mapped_column(default=1)  # изделий в заказе (крафт ×N)
     slot_no: Mapped[int] = mapped_column(default=1)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finishes_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

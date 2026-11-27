@@ -55,12 +55,6 @@ PAGE = """<!doctype html>
        url("/fonts/Orbix-Regular.ttf") format("truetype");
   font-display: swap;
 }
-/* цифры в Orbix проблемные — этот диапазон рендерим системным шрифтом */
-@font-face {
-  font-family: "Orbix";
-  src: local("Segoe UI"), local("Roboto"), local("Arial");
-  unicode-range: U+0030-0039, U+0660-0669;
-}
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 button, input, select, textarea { font-family: inherit; }
@@ -183,7 +177,9 @@ const SECTIONS = [
 const SHIP_TABS = [["info", "Общая информация"], ["inv", "Инвентарь"], ["equip", "Оснащение"]];
 const ICONS = { resource: "⛏️", consumable: "💊", module: "🔩", repair_kit: "🧰", special: "💎" };
 const RAR = { common: "обычный", rare: "редкий", epic: "эпический", unique: "уникальный" };
-let SECTION = "ship", SHIP_TAB = "info", TOAST = "", ME = null;
+const VK_HASH = new URLSearchParams(LP).get("vk_hash") || "";
+let SECTION = ["ship", "craft", "shop", "journal", "stats"].includes(VK_HASH) ? VK_HASH : "ship";
+let SHIP_TAB = "info", TOAST = "", ME = null;
 
 const $c = () => document.getElementById("content");
 const icon = (cat) => ICONS[cat] || "📦";
@@ -225,7 +221,7 @@ function goShipTab(tab) { SHIP_TAB = tab; TOAST = ""; render(); }
 function toast() { return TOAST ? `<div class="toast">${TOAST}</div>` : ""; }
 async function walletBar() {
   const me = await loadMe();
-  return `<div class="walletbar"><span>💎 ${me.eon}</span><span>🪙 ${me.quant}</span></div>`;
+  return `<div class="walletbar"><span>Эоны: ${me.eon} 💎</span><span>Кванты: ${me.quant} 🪙</span></div>`;
 }
 function row(k, v) { return `<div class="row"><span>${k}</span><span>${v}</span></div>`; }
 function card(title, html) { return `<div class="card"><h2>${title}</h2>${html}</div>`; }
@@ -262,7 +258,8 @@ async function viewInventory() {
   const bgStyle = inv.bg
     ? ` style="background: linear-gradient(rgba(11,16,32,0.35), rgba(11,16,32,0.55)), url('${inv.bg}') center/cover no-repeat"`
     : "";
-  return `<div class="card"${bgStyle}><h2>📦 Инвентарь (${inv.items.length}/${inv.size_limit || "∞"})</h2><div class="grid">${cells}</div></div>`
+  return await walletBar()
+    + `<div class="card"${bgStyle}><h2>📦 Инвентарь (${inv.items.length}/${inv.size_limit || "∞"})</h2><div class="grid">${cells}</div></div>`
     + `<div class="note">Нажмите на предмет, чтобы открыть его карточку.</div>`;
 }
 
@@ -367,17 +364,26 @@ async function viewCraft() {
     ["resource", "⛏️ Ресурсы"],
     ["special", "💎 Особое"],
   ];
+  const INSTANT = new Set(["consumable"]);
   const craftCard = (r) => {
     const mats = r.materials.map(m =>
-      `<span class="mat ${m.have < m.need ? "lack" : ""}">${m.icon ? `<img src="${m.icon}">` : ""}${m.name} ${Math.min(m.have, m.need)}/${m.need}</span>`
+      `<span class="mat ${m.have < m.need ? "lack" : ""}">${m.icon ? `<img src="${m.icon}">` : ""}${m.name} ${m.need}/${m.have}</span>`
     ).join("");
+    const maxN = r.materials.length
+      ? Math.min(...r.materials.map(m => Math.floor(m.have / Math.max(1, m.need))))
+      : 0;
+    const instant = INSTANT.has(r.result.category || "");
+    const timeLabel = instant ? "⚡ мгновенно" : `${r.duration_sec} с`;
+    const buttons = r.can_craft
+      ? `<button class="btn" onclick="act('craft ${r.code} 1')">Создать 1</button>
+         <button class="btn ghost" onclick="act('craft ${r.code} all')">Создать всё (${maxN})</button>`
+      : `<button class="btn" disabled style="opacity:.4">Не хватает</button>`;
     return `<div class="craftcard">
       <div class="ci">${r.result.icon ? `<img src="${r.result.icon}">` : "🧪"}</div>
       <div class="cn">«${r.name}»</div>
-      <div class="cd">${r.result.qty}× ${r.result.name} · ${r.duration_sec} с</div>
+      <div class="cd">${r.result.qty}× ${r.result.name} · ${timeLabel}</div>
       <div>${mats}</div>
-      <button class="btn" ${r.can_craft ? "" : "disabled style='opacity:.4'"}
-        onclick="act('craft ${r.code}')">${r.can_craft ? "Создать" : "Не хватает"}</button>
+      ${buttons}
     </div>`;
   };
   for (const [cat, title] of CATS) {

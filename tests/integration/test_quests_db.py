@@ -199,19 +199,9 @@ async def test_tutorial_chain_progression(session, seeded, bus):
     await expeditions.request_return(session, character)
     await expeditions.arrive_expedition(session, {"expedition_id": str(expedition.id)})
 
-    # шаг 4: крафт (завершает цепочку)
+    # шаг 4: крафт (завершает цепочку) — нанопластырь крафтится МГНОВЕННО
     job = await crafting.start_craft(session, character, "craft_nano_patch")
-    job.finishes_at = datetime.now(UTC) - timedelta(seconds=1)
-    await session.execute(
-        sa.update(__import__("app.models", fromlist=["Timer"]).Timer)
-        .where(
-            __import__("app.models", fromlist=["Timer"]).Timer.type == "craft_done",
-            __import__("app.models", fromlist=["Timer"]).Timer.payload["job_id"].astext == str(job.id),
-        )
-        .values(fires_at=job.finishes_at)
-    )
-    await session.flush()
-    await _run_due(session, bus)
+    assert job is None  # расходник: без таймера, прогресс засчитан сразу
     active = await quests.active_quests(session, character)
     assert active == []  # цепочка завершена
     completed = (

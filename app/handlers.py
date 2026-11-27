@@ -536,15 +536,42 @@ async def cmd_recipes(session: AsyncSession, ctx: CommandContext, args: dict[str
 
 async def cmd_craft(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
+    lang = character.lang
     code = str(args.get("code", "")).strip()
     if not code:
         raise DomainError("bad_args", t("craft_bad", character.lang))
-    job = await crafting.start_craft(session, character, code)
+    raw_qty = str(args.get("qty", "1")).strip().lower()
+    if raw_qty in ("all", "всё", "все"):
+        # «всё»: максимум, на что хватит материалов
+        _, rows = await characters.list_inventory(session, character.id)
+        owned = {r.code: r.qty for r in rows}
+        recipe_row = next(
+            (r for r in await crafting.list_recipes(session, character) if r["code"] == code),
+            None,
+        )
+        if recipe_row is None:
+            raise DomainError("unknown_recipe", f"Неизвестный рецепт: {code}")
+        qty = crafting.max_craftable(recipe_row["materials"], owned)
+        if qty < 1:
+            raise DomainError("missing_materials", t("recipe_no_materials", lang))
+    else:
+        try:
+            qty = max(1, int(raw_qty))
+        except ValueError:
+            raise DomainError("bad_args", t("craft_bad", lang)) from None
+    recipe = await session.scalar(
+        sa.select(RecipeTemplate).where(RecipeTemplate.code == code)
+    )
+    name = recipe.name if recipe else code
+    job = await crafting.start_craft(session, character, code, qty=qty)
+    if job is None:  # расходники крафтятся мгновенно
+        return CommandResult(message=t("craft_instant_ok", lang, name=name, qty=qty))
     return CommandResult(
         message=t(
             "craft_started",
-            character.lang,
-            code=code,
+            lang,
+            name=name,
+            qty=qty,
             seconds=int((job.finishes_at - job.started_at).total_seconds()),
         )
     )
@@ -988,7 +1015,12 @@ def parse_command(text: str) -> tuple[str, dict[str, Any]]:
         tokens = rest.split()
         if cmd == "craftcancel" and tokens:
             return cmd, {"index": int(tokens[0])}
-        return cmd, {"code": tokens[0]} if tokens else {}
+        if not tokens:
+            return cmd, {}
+        args: dict[str, Any] = {"code": tokens[0]}
+        if len(tokens) > 1:
+            args["qty"] = tokens[1]  # число или all («всё, на что хватит»)
+        return cmd, args
     if cmd == "send":
         tokens = rest.split()
         if len(tokens) >= 2:

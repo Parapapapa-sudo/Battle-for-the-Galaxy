@@ -51,13 +51,14 @@ async def _run_due(session: AsyncSession, bus: CommandBus | None = None) -> int:
 @requires_db
 async def test_start_craft_consumes_materials_and_schedules_timer(session, seeded):
     character = await _character(session, seeded, scrap=10)
-    job = await crafting.start_craft(session, character, "craft_nano_patch")
+    job = await crafting.start_craft(session, character, "craft_repair_kit")
+    assert job is not None
 
     assert job.status == "running"
     assert job.finishes_at > datetime.now(UTC)
     _, items = await characters.list_inventory(session, character.id)
     scrap = sum(r.qty for r in items if r.code == "scrap_metal")
-    assert scrap == 20 - 3  # стартовые 10 + выданные 10, списано 3
+    assert scrap == 20 - 5  # стартовые 10 + выданные 10, списано 5
 
     timer = await session.scalar(
         sa.select(Timer).where(Timer.type == "craft_done", Timer.status == "pending")
@@ -80,9 +81,9 @@ async def test_craft_missing_materials_nothing_consumed(session, seeded):
 @requires_db
 async def test_craft_requires_port_and_slot(session, seeded):
     character = await _character(session, seeded, scrap=20)
-    await crafting.start_craft(session, character, "craft_nano_patch")
+    await crafting.start_craft(session, character, "craft_repair_kit")
     with pytest.raises(DomainError) as exc_info:  # 1 слот по умолчанию
-        await crafting.start_craft(session, character, "craft_nano_patch")
+        await crafting.start_craft(session, character, "craft_repair_kit")
     assert exc_info.value.code == "no_free_slot"
 
     ship = await session.get(Ship, character.id)
@@ -90,14 +91,15 @@ async def test_craft_requires_port_and_slot(session, seeded):
     ship.fuel = 50
     await expeditions.launch_expedition(session, character)
     with pytest.raises(DomainError) as exc_info:
-        await crafting.start_craft(session, character, "craft_nano_patch")
+        await crafting.start_craft(session, character, "craft_repair_kit")
     assert exc_info.value.code == "not_in_port"
 
 
 @requires_db
 async def test_craft_completion_grants_result_via_timer(session, seeded, bus):
     character = await _character(session, seeded, scrap=10)
-    job = await crafting.start_craft(session, character, "craft_nano_patch")
+    job = await crafting.start_craft(session, character, "craft_repair_kit")
+    assert job is not None
     await _backdate_job(session, job)
     await session.flush()
 
@@ -105,11 +107,44 @@ async def test_craft_completion_grants_result_via_timer(session, seeded, bus):
     await session.refresh(job)
     assert job.status == "done"
     _, items = await characters.list_inventory(session, character.id)
-    nano = sum(r.qty for r in items if r.code == "nano_patch")
-    assert nano == 3 + 1  # стартовые 3 + скрафченный
+    kits = sum(r.qty for r in items if r.code == "repair_kit")
+    assert kits == 2 + 1  # стартовые 2 + скрафченный
 
     texts = [m.text for m in (await session.scalars(sa.select(Outbox))).all()]
     assert any("Крафт завершён" in t for t in texts)
+
+
+@requires_db
+async def test_instant_craft_consumable_and_qty(session, seeded):
+    """Расходники крафтятся мгновенно (без таймера/слота); крафт ×N списывает ×N."""
+    character = await _character(session, seeded, scrap=10)
+    # мгновенный: job=None, результат сразу, таймера нет
+    job = await crafting.start_craft(session, character, "craft_nano_patch")
+    assert job is None
+    _, items = await characters.list_inventory(session, character.id)
+    assert sum(r.qty for r in items if r.code == "nano_patch") == 3 + 1
+    timer = await session.scalar(
+        sa.select(Timer).where(Timer.type == "craft_done", Timer.status == "pending")
+    )
+    assert timer is None
+
+    # мгновенный ×3: материалы ×3 (9 лома), результат ×3
+    job = await crafting.start_craft(session, character, "craft_nano_patch", qty=3)
+    assert job is None
+    _, items = await characters.list_inventory(session, character.id)
+    assert sum(r.qty for r in items if r.code == "nano_patch") == 4 + 3
+    assert sum(r.qty for r in items if r.code == "scrap_metal") == 20 - 3 - 9
+
+    # max_craftable: лома осталось 8, рецепт ремкомплекта — 5 → максимум 1
+    _, items = await characters.list_inventory(session, character.id)
+    owned = {r.code: r.qty for r in items}
+    recipes = await crafting.list_recipes(session, character)
+    kit = next(r for r in recipes if r["code"] == "craft_repair_kit")
+    assert crafting.max_craftable(kit["materials"], owned) == 1
+
+    # таймерный крафт: заказ с qty=1 (ремкомплект — «запчасти», за время)
+    job = await crafting.start_craft(session, character, "craft_repair_kit", qty=1)
+    assert job is not None and job.qty == 1
 
 
 @requires_db
@@ -121,6 +156,7 @@ async def test_craft_result_goes_to_waiting_when_full(session, seeded, bus):
     _, check = await characters.list_inventory(session, character.id)
     assert len(check) == 30  # инвентарь полон
     job = await crafting.start_craft(session, character, "craft_trinium_refine")  # результат: trinium_ore
+    assert job is not None
     await _backdate_job(session, job)
 
     await _run_due(session, bus)
@@ -161,6 +197,7 @@ async def test_waiting_auto_flushes_when_space_freed(session, seeded):
 async def test_cancel_craft_partial_return_and_timer_cancelled(session, seeded, bus):
     character = await _character(session, seeded, scrap=10)
     job = await crafting.start_craft(session, character, "craft_repair_kit")  # 5 лома
+    assert job is not None
     text = await crafting.cancel_craft(session, character, 1)
     await session.refresh(job)
     assert job.status == "cancelled"
@@ -182,14 +219,15 @@ async def test_notifications_grouped_and_important_separate(session, seeded, bus
     """Завершения объединяются в одно уведомление; важные — отдельно (ТЗ)."""
     character = await _character(session, seeded, scrap=20)
     character.craft_slots = 2  # два параллельных заказа для проверки группировки
-    nano_job = await crafting.start_craft(session, character, "craft_nano_patch")
+    kit_job = await crafting.start_craft(session, character, "craft_repair_kit")
     trinium_job = await crafting.start_craft(session, character, "craft_trinium_refine")  # rare!
-    await _backdate_job(session, nano_job)
+    assert kit_job is not None and trinium_job is not None
+    await _backdate_job(session, kit_job)
     await _backdate_job(session, trinium_job)
 
     await _run_due(session, bus)
     texts = [m.text for m in (await session.scalars(sa.select(Outbox))).all()]
-    assert any("Крафт завершён" in t and "Нанопластырь" in t for t in texts)
+    assert any("Крафт завершён" in t and "Ремкомплект" in t for t in texts)
     assert any("Важный результат крафта" in t and "триния" in t for t in texts)
 
 

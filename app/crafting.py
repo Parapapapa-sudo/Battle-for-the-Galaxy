@@ -105,8 +105,40 @@ async def running_jobs(session: AsyncSession, character: Character) -> list[Craf
     )
 
 
-async def start_craft(session: AsyncSession, character: Character, recipe_code: str) -> CraftJob:
+# расходники крафтятся мгновенно; модули/запчасти — за время (ТЗ заказчика)
+INSTANT_CATEGORIES = {"consumable"}
+
+
+def max_craftable(materials: list[dict[str, Any]], owned: dict[str, int]) -> int:
+    """Сколько изделий хватит материалов (0 — не хватает даже на одно)."""
+    limits = [
+        owned.get(str(mat["code"]), 0)
+        // max(1, int(mat.get("qty", mat.get("need", 1))))
+        for mat in materials
+    ]
+    return min(limits) if limits else 0
+
+
+async def result_category(session: AsyncSession, recipe: RecipeTemplate) -> str:
+    from app.models_game import ItemTemplate
+
+    return str(
+        await session.scalar(
+            sa.select(ItemTemplate.category).where(
+                ItemTemplate.code == recipe.result_item_code
+            )
+        )
+        or "special"
+    )
+
+
+async def start_craft(
+    session: AsyncSession, character: Character, recipe_code: str, qty: int = 1
+) -> CraftJob | None:
+    """Запуск крафта ×qty. Расходники — мгновенно (None), остальное — заказ (job)."""
     await _require_port(session, character)
+    if qty < 1:
+        raise DomainError("bad_qty", "Количество: не меньше 1.")
     recipe = await session.scalar(
         sa.select(RecipeTemplate).where(
             RecipeTemplate.code == recipe_code, RecipeTemplate.status == "published"
@@ -120,26 +152,46 @@ async def start_craft(session: AsyncSession, character: Character, recipe_code: 
     owned = {r.code: r.qty for r in rows}
     missing = []
     for mat in recipe.materials:
-        lack = int(mat["qty"]) - owned.get(str(mat["code"]), 0)
+        lack = int(mat["qty"]) * qty - owned.get(str(mat["code"]), 0)
         if lack > 0:
             missing.append(f"{mat['code']} не хватает {lack}")
     if missing:
         raise DomainError("missing_materials", "Не хватает материалов: " + ", ".join(missing))
 
-    jobs = await running_jobs(session, character)
-    if len(jobs) >= character.craft_slots:
-        raise DomainError(
-            "no_free_slot",
-            f"Все производственные слоты заняты ({character.craft_slots}).",
-        )
+    instant = await result_category(session, recipe) in INSTANT_CATEGORIES
+    if not instant:
+        jobs = await running_jobs(session, character)
+        if len(jobs) >= character.craft_slots:
+            raise DomainError(
+                "no_free_slot",
+                f"Все производственные слоты заняты ({character.craft_slots}).",
+            )
 
     for mat in recipe.materials:
-        await characters.remove_items(session, character, code=str(mat["code"]), qty=int(mat["qty"]))
+        await characters.remove_items(
+            session, character, code=str(mat["code"]), qty=int(mat["qty"]) * qty
+        )
+
+    if instant:
+        # мгновенный крафт: результат сразу, таймер и слот не нужны
+        await characters.grant_items(
+            session, character, code=recipe.result_item_code,
+            qty=recipe.result_qty * qty, allow_loss=True,
+        )
+        from app.quests import track
+
+        for _ in range(qty):
+            await track(
+                session, character, "crafted", {"code": recipe.result_item_code}
+            )
+        await session.flush()
+        return None
 
     now = datetime.now(UTC)
     job = CraftJob(
         character_id=character.id,
         recipe_id=recipe.id,
+        qty=qty,
         slot_no=len(jobs) + 1,
         started_at=now,
         finishes_at=now + timedelta(seconds=recipe.duration_sec),
@@ -224,35 +276,37 @@ async def craft_done_handler(session: AsyncSession, payload: dict[str, Any]) -> 
         if recipe is None:
             continue
         due_job.status = "done"
+        total_qty = recipe.result_qty * due_job.qty
         from app.quests import track
 
-        await track(
-            session,
-            await _character(session, job.character_id),
-            "crafted",
-            {"code": recipe.result_item_code},
-        )
+        for _ in range(due_job.qty):
+            await track(
+                session,
+                await _character(session, job.character_id),
+                "crafted",
+                {"code": recipe.result_item_code},
+            )
         # результат: в инвентарь; при нехватке места — в «Ожидает получения» (ТЗ, не теряется)
         try:
             await characters.grant_items(
                 session,
                 await _character(session, job.character_id),
                 code=recipe.result_item_code,
-                qty=recipe.result_qty,
+                qty=total_qty,
                 kind="ship",
                 allow_loss=False,
             )
-            line = f"{recipe.name} ×{recipe.result_qty}"
+            line = f"{recipe.name} ×{total_qty}"
         except DomainError:
             await characters.grant_items(
                 session,
                 await _character(session, job.character_id),
                 code=recipe.result_item_code,
-                qty=recipe.result_qty,
+                qty=total_qty,
                 kind="waiting",
                 allow_loss=True,
             )
-            line = f"{recipe.name} ×{recipe.result_qty} (в разделе «Ожидает получения»)"
+            line = f"{recipe.name} ×{total_qty} (в разделе «Ожидает получения»)"
         result_template = await session.scalar(
             sa.select(ItemTemplate).where(ItemTemplate.code == recipe.result_item_code)
         )

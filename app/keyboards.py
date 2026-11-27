@@ -51,12 +51,27 @@ LABEL_KEY = {
 def vk_keyboard(rows: list[list[Any]], lang: str = "ru") -> dict[str, Any]:
     buttons = []
     for row in rows:
-        brow = []
+        brow: list[dict[str, Any]] = []
         for entry in row:
             if isinstance(entry, tuple):
                 cmd, label = entry
             else:
                 cmd, label = entry, t(LABEL_KEY.get(entry, entry), lang)
+            if cmd.startswith("app:"):
+                # кнопка открытия мини-приложения на разделе <hash>
+                from app.config import get_settings
+
+                brow.append(
+                    {
+                        "action": {
+                            "type": "open_app",
+                            "app_id": get_settings().vk_app_id,
+                            "label": label[:40],
+                            "hash": cmd[4:],
+                        }
+                    }
+                )
+                continue
             brow.append(
                 {
                     "action": {
@@ -136,33 +151,19 @@ async def keyboard_for_character(
     transfer_rows = await _pending_transfer_rows(session, character, lang)
 
     if hall == "workshop":
+        from app.config import get_settings
+
+        craft_btn: Any = (
+            ("app:craft", t("kb_craft_app", lang))
+            if get_settings().vk_app_id
+            else "recipes"  # без настроенного мини-аппа — текстовый список
+        )
         ws_rows: list[list[Any]] = [
-            ["mods", "recipes"],
+            ["mods", craft_btn],
             ["inv", "ship"],
         ]
         pool: list[list[Any]] = []
-        # крафт — только то, на что хватает материалов
-        from app import crafting as crafting_app
-
-        for recipe in await crafting_app.list_recipes(session, character):
-            if recipe["can_craft"]:
-                pool.append(
-                    [(f"craft {recipe['code']}", t("kb_craft_recipe", lang, name=recipe["name"]))]
-                )
-        # отмена активных заказов
-        from app.models_game import RecipeTemplate
-
-        for idx, job in enumerate(await crafting_app.running_jobs(session, character), start=1):
-            job_recipe = await session.get(RecipeTemplate, job.recipe_id)
-            pool.append(
-                [
-                    (
-                        f"craftcancel {idx}",
-                        t("kb_cancel_job", lang, name=job_recipe.name if job_recipe else "?"),
-                    )
-                ]
-            )
-        # модули: установка/снятие и тренировка — кнопками, коды скрыты
+        # крафт переехал в мини-апп — в чате только модули
         from app import modules as modules_app
 
         for mod in await modules_app.list_modules(session, character):
