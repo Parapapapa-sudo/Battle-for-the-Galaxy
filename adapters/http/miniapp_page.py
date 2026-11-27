@@ -215,34 +215,59 @@ async function viewInventory() {
 // --- Корабль: оснащение ---------------------------------------------------------
 async function viewEquipment() {
   const eq = await api("/api/equipment");
-  const cell = (m) =>
-    `<div class="slot" onclick="openItem('${m.code}')" title="${m.name}">
+  const cell = (m, kind) =>
+    `<div class="slot" onclick="${kind ? `openSlotPicker('${kind}','${m.code}')` : `openItem('${m.code}')`}" title="${m.name}">
        ${m.icon ? pic(m.icon, m.kind) : (m.kind === "ability" ? "⚡" : "🔩")}<span class="lvl">ур.${m.level}</span></div>`;
   const free = (kind, count) => Array.from({ length: count }, () =>
     `<div class="slot free" onclick="openSlotPicker('${kind}')" title="Установить модуль">＋</div>`).join("");
   const shipFree = Math.max(0, (eq.ship_slots_total || 0) - eq.ship_slots.length);
   const crewFree = Math.max(0, (eq.crew_slots_total || 0) - eq.crew_skills.length);
   return card("🛠 Оснащение корабля",
-      `<div class="grid">${eq.ship_slots.map(cell).join("")}${free("ship", shipFree)}</div>`)
+      `<div class="grid">${eq.ship_slots.map(m => cell(m, "ship")).join("")}${free("ship", shipFree)}</div>`)
     + card("👥 Команда (навыки)",
-      `<div class="grid">${eq.crew_skills.map(cell).join("")}${free("crew", crewFree)}</div>`)
-    + (eq.storage.length ? card("🎒 Модули в инвентаре", `<div class="grid">${eq.storage.map(cell).join("")}</div>`) : "")
-    + `<div class="note">Тап по занятому слоту — карточка модуля; тап по пустому (＋) — выбор, что установить.</div>`;
+      `<div class="grid">${eq.crew_skills.map(m => cell(m, "crew")).join("")}${free("crew", crewFree)}</div>`)
+    + (eq.storage.length ? card("🎒 Модули в инвентаре", `<div class="grid">${eq.storage.map(m => cell(m)).join("")}</div>`) : "")
+    + `<div class="note">Тап по слоту (пустому или занятому) — подбор модуля из инвентаря: установка и замена.</div>`;
 }
 
-// выбор модуля в пустой слот: совместимые варианты из инвентаря
-async function openSlotPicker(kind) {
+// Подбор модуля в слот: инвентарь, отфильтрованный под этот слот.
+// Пустой слот — установка; занятый (currentCode) — замена (снять старый + поставить новый).
+async function openSlotPicker(kind, currentCode) {
   const eq = await api("/api/equipment");
+  const all = [...eq.ship_slots, ...eq.crew_skills, ...eq.storage];
+  const current = currentCode ? all.find(m => m.code === currentCode) : null;
   const fit = eq.storage.filter(m => kind === "crew" ? m.kind === "ability" : m.kind !== "ability");
+  const cellPick = (m) =>
+    `<div class="slot" onclick="pickModule('${m.code}', ${currentCode ? `'${currentCode}'` : "null"})" title="${m.name}">
+       ${m.icon ? pic(m.icon, m.kind) : (m.kind === "ability" ? "⚡" : "🔩")}
+       <span class="lvl">ур.${m.level}</span></div>`;
   let html = `<button class="back" onclick="render()">← Назад</button>` + toast();
-  html += card(kind === "crew" ? "👥 Навык команды — выбор" : "🛠 Модуль корабля — выбор",
+  if (current) {
+    html += card("Сейчас в слоте",
+      `<div class="quest"><div class="qn">${current.name} <span class="qp">ур. ${current.level}</span></div></div>
+       <button class="btn ghost" onclick="openItem('${current.code}')">Карточка модуля</button>
+       <button class="btn ghost" onclick="act('uninstall ${current.code}')">Снять без замены</button>
+       <div class="note">Выбор модуля ниже заменит текущий.</div>`);
+  }
+  html += card(kind === "crew" ? "👥 Инвентарь: навыки команды" : "🛠 Инвентарь: модули корабля",
     fit.length
-      ? fit.map(m => `<div class="quest">
-          <div class="qn">${m.name} <span class="qp">ур. ${m.level}</span></div>
-          <button class="btn" onclick="act('install ${m.code}')">Установить</button></div>`).join("")
+      ? `<div class="grid">${fit.map(cellPick).join("")}</div>`
       : `<div class="note">В инвентаре нет подходящих модулей${kind === "crew" ? " со способностями" : ""}.
          Модули добываются в экспедициях и покупаются.</div>`);
   $c().innerHTML = html;
+}
+
+// установка с заменой: сначала снять текущий (если есть), затем поставить выбранный
+async function pickModule(code, replaceCode) {
+  try {
+    if (replaceCode) {
+      await api("/api/action", { method: "POST", body: JSON.stringify({ cmd: "uninstall " + replaceCode }) });
+    }
+    const r = await api("/api/action", { method: "POST", body: JSON.stringify({ cmd: "install " + code }) });
+    TOAST = r.message;
+  } catch (e) { TOAST = "Ошибка: " + e.message; }
+  ME = null;
+  render();
 }
 
 // --- Карточка предмета / товара (универсальная) ---------------------------------
