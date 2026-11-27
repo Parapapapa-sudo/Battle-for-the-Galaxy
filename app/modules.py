@@ -117,6 +117,11 @@ async def install_module(session: AsyncSession, character: Character, module_cod
 
 
 async def uninstall_module(session: AsyncSession, character: Character, module_code: str) -> None:
+    # снятие модулей — только в Мастерской (ТЗ заказчика)
+    from app.crafting import _require_workshop
+
+    await _require_workshop(session, character)
+
     await _require_dock(session, character)
     rows = await _instances(session, character.id)
     target = next(

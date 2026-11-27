@@ -153,35 +153,15 @@ async def keyboard_for_character(
     if hall == "workshop":
         from app.config import get_settings
 
-        craft_btn: Any = (
-            ("app:craft", t("kb_craft_app", lang))
-            if get_settings().vk_app_id
-            else "recipes"  # без настроенного мини-аппа — текстовый список
-        )
-        ws_rows: list[list[Any]] = [
-            ["mods", craft_btn],
-            ["inv", "ship"],
-        ]
-        pool: list[list[Any]] = []
-        # крафт переехал в мини-апп — в чате только модули
-        from app import modules as modules_app
-
-        for mod in await modules_app.list_modules(session, character):
-            if mod["installed"]:
-                pool.append(
-                    [(f"uninstall {mod['code']}", t("kb_uninstall", lang, name=mod["name"]))]
-                )
-            else:
-                pool.append(
-                    [(f"install {mod['code']}", t("kb_install", lang, name=mod["name"]))]
-                )
-            pool.append(
-                [(f"train {mod['code']} 10", t("kb_train10", lang, name=mod["name"]))]
-            )
-        page_rows, page, total = _paginate(pool, character.hall_page)
-        ws_rows += transfer_rows + page_rows
-        if total > 1:
-            ws_rows.append([("page next", t("kb_page_next", lang, n=page + 1, total=total))])
+        if get_settings().vk_app_id:
+            # разделы — в мини-апп (open_app с hash); действия с модулями — там же
+            ws_rows: list[list[Any]] = [
+                [("app:equip", t("kb_mods", lang)), ("app:craft", t("kb_craft_app", lang))],
+                [("app:inv", t("kb_inv", lang)), ("app:ship", t("kb_ship", lang))],
+            ]
+        else:  # без мини-аппа — прежние текстовые экраны
+            ws_rows = [["mods", "recipes"], ["inv", "ship"]]
+        ws_rows += transfer_rows
         ws_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(ws_rows, lang)
     if hall == "hq":

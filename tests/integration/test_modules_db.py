@@ -19,6 +19,7 @@ async def _character(
     character = await characters.create_character(
         session, account_id=account.id, name=f"Тестер{uuid.uuid4().hex[:6]}", faction_code=faction
     )
+    character.hall = "workshop"  # снятие модулей — только в Мастерской
     ship = await session.get(Ship, character.id)
     assert ship is not None
     ship.fuel = fuel

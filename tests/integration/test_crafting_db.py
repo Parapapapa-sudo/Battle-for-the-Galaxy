@@ -22,6 +22,7 @@ async def _character(session, seeded, scrap: int = 0, fuel: int = 50) -> Charact
     character = await characters.create_character(
         session, account_id=account.id, name=f"Тестер{uuid.uuid4().hex[:6]}", faction_code="azimuth"
     )
+    character.hall = "workshop"  # крафт и оснащение — только в Мастерской
     ship = await session.get(Ship, character.id)
     assert ship is not None
     ship.fuel = fuel
@@ -76,6 +77,28 @@ async def test_craft_missing_materials_nothing_consumed(session, seeded):
     assert "scrap_metal" in exc_info.value.message
     _, items = await characters.list_inventory(session, character.id)
     assert sum(r.qty for r in items if r.code == "scrap_metal") == 0  # ничего не списано (ТЗ)
+
+
+@requires_db
+async def test_craft_and_uninstall_require_workshop(session, seeded):
+    """Крафт и снятие модулей недоступны вне Мастерской (ТЗ заказчика)."""
+    character = await _character(session, seeded, scrap=10)
+    character.hall = "main"
+    await session.flush()
+    with pytest.raises(DomainError) as exc_info:
+        await crafting.start_craft(session, character, "craft_repair_kit")
+    assert exc_info.value.code == "not_in_workshop"
+
+    from app import modules
+
+    await modules.install_module(session, character, "aim_computer")  # установка — можно где угодно в порту
+    with pytest.raises(DomainError) as exc_info:
+        await modules.uninstall_module(session, character, "aim_computer")
+    assert exc_info.value.code == "not_in_workshop"
+
+    character.hall = "workshop"
+    await session.flush()
+    await modules.uninstall_module(session, character, "aim_computer")  # в Мастерской — можно
 
 
 @requires_db

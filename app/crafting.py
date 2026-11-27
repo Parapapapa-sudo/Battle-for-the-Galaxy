@@ -23,6 +23,15 @@ from app.models_game import Character, CraftJob, ItemTemplate, RecipeTemplate
 from core.errors import DomainError
 
 
+async def _require_workshop(session: AsyncSession, character: Character) -> None:
+    """Крафт и работа с оснащением — только в Мастерской космопорта (ТЗ заказчика)."""
+    await _require_port(session, character)
+    if (character.hall or "main") != "workshop":
+        raise DomainError(
+            "not_in_workshop", "Это доступно только в Мастерской (космопорт → Мастерская)."
+        )
+
+
 async def _require_port(session: AsyncSession, character: Character) -> None:
     from app.expeditions import get_ship
 
@@ -136,7 +145,7 @@ async def start_craft(
     session: AsyncSession, character: Character, recipe_code: str, qty: int = 1
 ) -> CraftJob | None:
     """Запуск крафта ×qty. Расходники — мгновенно (None), остальное — заказ (job)."""
-    await _require_port(session, character)
+    await _require_workshop(session, character)
     if qty < 1:
         raise DomainError("bad_qty", "Количество: не меньше 1.")
     recipe = await session.scalar(

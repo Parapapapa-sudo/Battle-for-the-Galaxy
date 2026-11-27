@@ -141,13 +141,13 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
   font-size: 11px; color: #cdd7ee; }
 .mat.lack { color: #ff9d9d; }
 .mat img { width: 18px; height: 18px; object-fit: contain; }
-.craftgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.craftgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .craftcard { display: flex; flex-direction: column; gap: 5px; padding: 10px 8px;
   border-radius: 14px; background: rgba(20, 27, 49, 0.42);
   border: 1px solid rgba(255,255,255,0.10);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .craftcard .ci { font-size: 34px; text-align: center; }
-.craftcard .ci img { width: 38px; height: 38px; object-fit: contain; }
+.craftcard .ci img { width: 44px; height: 44px; object-fit: contain; }
 .craftcard .cn { font-size: 12px; font-weight: 700; text-align: center; }
 .craftcard .cd { font-size: 11px; color: #8b96ad; text-align: center; }
 .craftcard .btn { padding: 9px; font-size: 13px; margin-top: 4px; }
@@ -177,8 +177,9 @@ const SHIP_TABS = [["info", "Общая информация"], ["inv", "Инв�
 const ICONS = { resource: "⛏️", consumable: "💊", module: "🔩", repair_kit: "🧰", special: "💎" };
 const RAR = { common: "обычный", rare: "редкий", epic: "эпический", unique: "уникальный" };
 const VK_HASH = (location.hash || "").replace(/^#/, "") || new URLSearchParams(LP).get("vk_hash") || "";
-let SECTION = ["ship", "craft", "shop", "journal", "stats"].includes(VK_HASH) ? VK_HASH : "ship";
-let SHIP_TAB = "info", TOAST = "", ME = null;
+let SECTION = "ship", SHIP_TAB = "info", TOAST = "", ME = null;
+if (["craft", "shop", "journal", "stats"].includes(VK_HASH)) SECTION = VK_HASH;
+else if (["inv", "equip", "info"].includes(VK_HASH)) { SECTION = "ship"; SHIP_TAB = VK_HASH; }
 
 const $c = () => document.getElementById("content");
 const icon = (cat) => ICONS[cat] || "📦";
