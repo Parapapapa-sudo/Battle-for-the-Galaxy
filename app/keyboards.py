@@ -165,10 +165,17 @@ async def keyboard_for_character(
         ws_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(ws_rows, lang)
     if hall == "hq":
-        hq_rows: list[list[Any]] = [["quests", "shop"]]
+        from app.config import get_settings
+
+        shop_btn: Any = (
+            ("app:shop", t("kb_shop", lang))
+            if get_settings().vk_app_id
+            else "shop"  # без мини-аппа — текстовая витрина
+        )
+        hq_rows: list[list[Any]] = [["quests", shop_btn]]
         pool = []
-        # принятие доступных заданий и переключение отслеживания — прямо кнопками
-        from app import market as market_app
+        # принятие доступных заданий и переключение отслеживания — прямо кнопками;
+        # покупки переехали в мини-апп (раздел «Магазин»)
         from app import quests as quests_mod
 
         for _state, quest in await quests_mod.available_quests(session, character):
@@ -176,11 +183,6 @@ async def keyboard_for_character(
         for _state, quest in await quests_mod.active_quests(session, character):
             if quest.code != character.tracked_quest:
                 pool.append([(f"track {quest.code}", t("kb_track_quest", lang, name=quest.name))])
-        # покупки — кнопками вместо кодов предложений
-        for offer in await market_app.list_offers(session):
-            pool.append(
-                [(f"buy {offer.code}", t("kb_buy", lang, title=market_app.offer_title(offer, lang)))]
-            )
         page_rows, page, total = _paginate(pool, character.hall_page)
         hq_rows += transfer_rows + page_rows
         if total > 1:

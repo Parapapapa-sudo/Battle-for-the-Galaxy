@@ -137,8 +137,10 @@ async def test_port_halls_navigation(session, seeded):
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     assert rows[0] == ["Задания", "Магазин"]
     assert rows[1] == ["Принять «Первый вылет»"]
-    assert any(label.startswith("Купить: ") for row in rows for label in row)
-    assert rows[-2][0].startswith("Далее ▶")
+    # покупки — в мини-аппе: кнопок «Купить» в чате нет, «Магазин» открывает мини-апп
+    assert not any(label.startswith("Купить: ") for row in rows for label in row)
+    shop_action = kb["buttons"][0][1]["action"]
+    assert shop_action.get("type") == "open_app" and shop_action.get("hash") == "shop"
     assert rows[-1] == ["В основной зал"]
 
 
