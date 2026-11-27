@@ -869,24 +869,6 @@ async def cmd_hall(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     character.hall_page = 0  # смена зала — с первой страницы кнопок
     await session.flush()
     message = t(HALL_TITLES[hall], lang)
-    if hall == "main":
-        # кнопка ВНУТРИ сообщения — inline-клавиатура (open_link с ↗);
-        # у сообщения одна клавиатура, поэтому кнопка едет отдельным пузырём следом
-        from app.config import get_settings
-
-        app_id = get_settings().vk_app_id
-        if app_id:
-            await stores.add_outbox(
-                session,
-                character_id=character.id,
-                text=t("inspect_ship_text", lang),
-                payload={
-                    "inline_link_button": {
-                        "label": t("kb_inspect_ship", lang),
-                        "url": f"https://vk.com/app{app_id}#ship",
-                    }
-                },
-            )
     return CommandResult(message=message, image_pack=f"port_{hall}")
 
 
@@ -954,6 +936,10 @@ async def cmd_track(session: AsyncSession, ctx: CommandContext, args: dict[str, 
 async def cmd_quests(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     lang = character.lang
+    # игрок увидел список заданий → в Штабе появляются кнопки «Принять/Отслеживать»
+    if not (character.tutorial_state or {}).get("quests_viewed"):
+        character.tutorial_state = {**(character.tutorial_state or {}), "quests_viewed": True}
+        await session.flush()
     active = await quests_mod.active_quests(session, character)
     available = await quests_mod.available_quests(session, character)
     blocks: list[str] = [t("quests_title", lang)] if active or available else []

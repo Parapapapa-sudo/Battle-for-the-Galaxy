@@ -184,16 +184,28 @@ async def keyboard_for_character(
         for _state, quest in await quests_mod.active_quests(session, character):
             if quest.code != character.tracked_quest:
                 pool.append([(f"track {quest.code}", t("kb_track_quest", lang, name=quest.name))])
+        # кнопки заданий — только после того, как игрок открыл список («Задания»)
+        if not (character.tutorial_state or {}).get("quests_viewed"):
+            pool = [row for row in pool if not row[0][0].startswith(("accept ", "track "))]
         page_rows, page, total = _paginate(pool, character.hall_page)
         hq_rows += transfer_rows + page_rows
         if total > 1:
             hq_rows.append([("page next", t("kb_page_next", lang, n=page + 1, total=total))])
         hq_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(hq_rows, lang)
+    from app.config import get_settings
+
     main_rows: list[list[Any]] = [
         ["launch"],
         [("hall workshop", t("kb_workshop", lang)), ("hall hq", t("kb_hq", lang))],
     ]
+    # «Осмотреть корабль» — нижняя строка по центру (одна кнопка на всю ширину)
+    inspect_btn: Any = (
+        ("app:ship", t("kb_inspect_ship", lang))
+        if get_settings().vk_app_id
+        else ("ship", t("kb_inspect_ship", lang))
+    )
+    main_rows.append([inspect_btn])
     main_rows += transfer_rows
     return vk_keyboard(main_rows, lang)
 

@@ -135,32 +135,14 @@ class VkSender:
         platform: str | None,
         payload: dict[str, Any] | None = None,
     ) -> None:
-        # inline-кнопка внутри пузыря (open_link ↗) — вместо нижнего меню
-        inline_spec = (payload or {}).get("inline_link_button")
+        # уведомление приходит с АКТУАЛЬНОЙ клавиатурой — меню обновляется без команд от игрока
         keyboard: dict[str, Any] | None = None
-        if inline_spec:
-            keyboard = {
-                "inline": True,
-                "buttons": [
-                    [
-                        {
-                            "action": {
-                                "type": "open_link",
-                                "label": str(inline_spec["label"])[:40],
-                                "url": str(inline_spec["url"]),
-                            }
-                        }
-                    ]
-                ],
-            }
-        else:
-            # уведомление приходит с АКТУАЛЬНОЙ клавиатурой — меню обновляется само
-            async with self._sessions() as session:
-                character = await session.get(Character, uuid.UUID(character_id))
-                if character is not None:
-                    from app.keyboards import keyboard_for_character
+        async with self._sessions() as session:
+            character = await session.get(Character, uuid.UUID(character_id))
+            if character is not None:
+                from app.keyboards import keyboard_for_character
 
-                    keyboard = await keyboard_for_character(session, character.id)
+                keyboard = await keyboard_for_character(session, character.id)
         async with self._sessions() as session:
             rows = (
                 await session.scalars(

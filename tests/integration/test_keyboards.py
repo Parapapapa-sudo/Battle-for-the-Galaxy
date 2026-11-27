@@ -41,10 +41,10 @@ def test_vk_keyboard_structure() -> None:
     assert len(kb["buttons"]) == 2
     first = kb["buttons"][0][0]
     assert first["action"]["type"] == "text"
-    assert first["action"]["label"] == "Атака"
+    assert first["action"]["label"] == "⚔️ Атака"
     assert first["color"] == "positive"  # боевые — зелёным
     retreat = kb["buttons"][1][0]
-    assert retreat["action"]["label"] == "Отступить"
+    assert retreat["action"]["label"] == "🏃 Отступить"
     assert retreat["color"] == "negative"
 
 
@@ -79,11 +79,11 @@ async def test_onboarding_keyboards(session, seeded):
     await session.flush()
 
     kb = await keyboard_for_account(session, account)
-    assert _labels(kb) == ["Начать"]
+    assert _labels(kb) == ["▶️ Начать"]
 
     account.onboarding = {"step": "intro"}
     kb = await keyboard_for_account(session, account)
-    assert _labels(kb) == ["Продолжить"]
+    assert _labels(kb) == ["➡️ Продолжить"]
 
     account.onboarding = {"step": "intro2"}
     kb = await keyboard_for_account(session, account)
@@ -94,7 +94,7 @@ async def test_onboarding_keyboards(session, seeded):
 
     account.onboarding = {"step": "preview", "preview": "lumen"}
     kb = await keyboard_for_account(session, account)
-    assert _labels(kb) == ["Выбрать эту фракцию", "◀ К списку фракций"]
+    assert _labels(kb) == ["✅ Выбрать эту фракцию", "◀ К списку фракций"]
 
     # фракция выбрана, ждём имя: список фракций не показываем — только возврат
     account.onboarding = {"step": "join", "faction": "lumen"}
@@ -111,7 +111,13 @@ async def test_port_halls_navigation(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Экспедиция"], ["Мастерская", "Штаб"]]
+    assert rows == [
+        ["🚀 Экспедиция"],
+        ["🔧 Мастерская", "🎖 Штаб"],
+        ["🚀 Осмотреть корабль"],  # нижняя строка по центру
+    ]
+    inspect = kb["buttons"][-1][0]["action"]
+    assert inspect.get("type") == "open_app" and inspect.get("hash") == "ship"
     assert not any("О игроке" in label for row in rows for label in row)
 
     # мастерская: навигация + кнопки действий с пагинацией («Далее ▶»)
@@ -123,9 +129,9 @@ async def test_port_halls_navigation(session, seeded):
     # разделы ведут в мини-апп; «О корабле» убрана; «Заправиться» — командой
     assert rows == [
         ["⛽ Заправиться"],
-        ["Модули", "Крафт"],
-        ["Инвентарь"],
-        ["В основной зал"],
+        ["🔩 Модули", "🧪 Крафт"],
+        ["📦 Инвентарь"],
+        ["🏢 В основной зал"],
     ]
     payloads = [b["action"] for row in kb["buttons"] for b in row]
     app_actions = [a for a in payloads if a.get("type") == "open_app"]
@@ -137,13 +143,20 @@ async def test_port_halls_navigation(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows[0] == ["Задания", "Магазин"]
-    assert rows[1] == ["Принять «Первый вылет»"]
+    assert rows[0] == ["📜 Задания", "🛒 Магазин"]
+    # до просмотра списка заданий кнопок «Принять» нет
+    assert not any("Принять" in label for row in rows for label in row)
+    character.tutorial_state = {**(character.tutorial_state or {}), "quests_viewed": True}
+    await session.flush()
+    kb = await keyboard_for_character(session, character.id)
+    assert kb is not None
+    rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
+    assert rows[1] == ["✅ Принять «Первый вылет»"]
     # покупки — в мини-аппе: кнопок «Купить» в чате нет, «Магазин» открывает мини-апп
     assert not any(label.startswith("Купить: ") for row in rows for label in row)
     shop_action = kb["buttons"][0][1]["action"]
     assert shop_action.get("type") == "open_app" and shop_action.get("hash") == "shop"
-    assert rows[-1] == ["В основной зал"]
+    assert rows[-1] == ["🏢 В основной зал"]
 
 
 @requires_db
@@ -159,7 +172,7 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     assert kb is not None
     # свободное плавание: [Исследовать][Залатать] / [Инфо][В космопорт]
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Исследовать", "Залатать"], ["Инфо", "В космопорт"]]
+    assert rows == [["🧭 Исследовать", "🔧 Залатать"], ["ℹ️ Инфо", "🛬 В космопорт"]]
 
     # во время ремонта — только «Инфо»
     from app.models_game import Ship
@@ -171,7 +184,7 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     await expeditions.start_patch(session, character)
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
-    assert _labels(kb) == ["Инфо"]
+    assert _labels(kb) == ["ℹ️ Инфо"]
     # завершаем ремонт напрямую — снова полное меню
     expedition.patch_eta = datetime.now(UTC) - timedelta(seconds=1)
     await session.flush()
@@ -179,13 +192,13 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Исследовать", "Залатать"], ["Инфо", "В космопорт"]]
+    assert rows == [["🧭 Исследовать", "🔧 Залатать"], ["ℹ️ Инфо", "🛬 В космопорт"]]
 
     # в пути между событиями — только «Инфо»
     await expeditions.proceed(session, character, rng=random.Random(1))
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
-    assert _labels(kb) == ["Инфо"]
+    assert _labels(kb) == ["ℹ️ Инфо"]
     expedition.next_event_at = datetime.now(UTC) - timedelta(seconds=1)
     await session.flush()
     await expeditions.arrive_event(session, {"expedition_id": str(expedition.id)})
@@ -203,7 +216,7 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     if expedition.status == "active":
-        assert rows == [["Исследовать", "Залатать"], ["Инфо", "В космопорт"]]
+        assert rows == [["🧭 Исследовать", "🔧 Залатать"], ["ℹ️ Инфо", "🛬 В космопорт"]]
 
     # кнопка способности появляется, только если модуль установлен
     await battles.start_battle(
@@ -212,7 +225,7 @@ async def test_expedition_menu_and_battle_keyboard(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     labels = set(_labels(kb))
-    assert {"Атака", "shot", "Отступить", "Ремонт"} <= labels
+    assert {"⚔️ Атака", "shot", "🏃 Отступить", "🧰 Ремонт"} <= labels
     assert "go" not in labels  # в бою экспедиционного меню нет
 
 
@@ -233,6 +246,6 @@ async def test_interactive_event_shows_choice_buttons(session, seeded):
     payloads = [b["action"]["payload"] for row in kb["buttons"] for b in row]
     assert any("choice 1" in p for p in payloads)
     assert any("choice 2" in p for p in payloads)
-    assert "Пропустить" in labels or "Проскочить" in labels  # отказ (обычное/боевое событие)
+    assert "⏭ Пропустить" in labels or "💨 Проскочить" in labels  # отказ (обычное/боевое событие)
     assert "decline" in " ".join(payloads)
     assert "go" not in labels
