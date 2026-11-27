@@ -516,9 +516,7 @@ async def cmd_recipes(session: AsyncSession, ctx: CommandContext, args: dict[str
             t("recipe_mat_item", lang, name=m["name"], have=min(m["have"], m["need"]), need=m["need"])
             for m in r["materials"]
         )
-        status = t("recipe_ready", lang, code=r["code"]) if r["can_craft"] else t(
-            "recipe_no_materials", lang, code=r["code"]
-        )
+        status = t("recipe_ready", lang) if r["can_craft"] else t("recipe_no_materials", lang)
         block = t(
             "recipe_line",
             lang,
@@ -534,7 +532,6 @@ async def cmd_recipes(session: AsyncSession, ctx: CommandContext, args: dict[str
     jobs = await crafting.running_jobs(session, character)
     if jobs:
         blocks.append(t("recipes_slots", lang, used=len(jobs), total=character.craft_slots))
-    blocks.append(t("recipes_hint", lang))
     return CommandResult(message="\n\n".join(blocks))
 
 

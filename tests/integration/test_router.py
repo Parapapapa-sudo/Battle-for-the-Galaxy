@@ -179,9 +179,9 @@ async def test_recipes_screen_human_readable(session, seeded, sessions):
     )
     assert "«Нанопластырь» → 1× Нанопластырь (45 с)" in r.message
     assert "Материалы: Металлолом 3/3" in r.message  # стартовый лом покрывает рецепт
-    assert "✅ Готов · craft craft_nano_patch" in r.message
+    assert "✅ Готов" in r.message
+    assert "craft craft_nano_patch" not in r.message  # коды заменены кнопками в Мастерской
     assert "nano_patch (" not in r.message  # сырых кодов предметов нет
-    assert "Создание: craft <код>" in r.message
 
 
 @requires_db

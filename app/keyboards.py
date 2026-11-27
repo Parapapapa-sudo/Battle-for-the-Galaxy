@@ -17,6 +17,7 @@ COLOR_BY_COMMAND = {
     "launch": "positive",
     "patch": "positive",
     "accept": "positive",
+    "craft": "positive",
     "track": "primary",
     "retreat": "negative",
     "decline": "negative",
@@ -132,14 +133,25 @@ async def keyboard_for_character(
     # космопорт: залы (ТЗ заказчика). Основной — точка входа после экспедиции.
     hall = character.hall or "main"
     if hall == "workshop":
-        return vk_keyboard(
-            [
-                ["mods", "recipes"],
-                ["inv", "ship"],
-                [("hall main", t("kb_hall_main", lang))],
-            ],
-            lang,
-        )
+        ws_rows: list[list[Any]] = [
+            ["mods", "recipes"],
+            ["inv", "ship"],
+        ]
+        # кнопки крафта вместо кодов рецептов — только то, на что хватает материалов
+        from app import crafting as crafting_app
+
+        for recipe in (await crafting_app.list_recipes(session, character))[:4]:
+            if recipe["can_craft"]:
+                ws_rows.append(
+                    [
+                        (
+                            f"craft {recipe['code']}",
+                            t("kb_craft_recipe", lang, name=recipe["name"]),
+                        )
+                    ]
+                )
+        ws_rows.append([("hall main", t("kb_hall_main", lang))])
+        return vk_keyboard(ws_rows, lang)
     if hall == "hq":
         hq_rows: list[list[Any]] = [["quests", "shop"]]
         # принятие доступных заданий и переключение отслеживания — прямо кнопками
