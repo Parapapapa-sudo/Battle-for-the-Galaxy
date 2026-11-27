@@ -102,6 +102,43 @@ async def list_recipes(session: AsyncSession, character: Character) -> list[dict
     return result
 
 
+async def refuel(session: AsyncSession, character: Character) -> tuple[int, int]:
+    """Заправка в Мастерской: полный бак за кванты, кулдаун (с подпиской ×2 короче).
+
+    Возвращает (топливо, вместимость). Цена/кулдаун — config workshop.refuel_*.
+    """
+    await _require_workshop(session, character)
+    from app import economy, market, stores
+
+    ship, template = await characters.get_ship(session, character.id)
+    capacity = int((template.base_stats or {}).get("fuel_capacity", 0))
+    if capacity <= 0:
+        raise DomainError("no_tank", "У корабля нет бака.")
+    if ship.fuel >= capacity:
+        raise DomainError("fuel_full", "Бак уже полон — заправка не нужна.")
+
+    cooldown = int(await stores.get_param(session, "workshop.refuel_cooldown_sec", 7200))
+    if await market.has_active_subscription(session, character):
+        cooldown //= 2  # подписка: заправка вдвое чаще (ТЗ)
+    now = datetime.now(UTC)
+    if character.last_refuel_at is not None:
+        elapsed = (now - character.last_refuel_at).total_seconds()
+        if elapsed < cooldown:
+            wait_min = int((cooldown - elapsed) // 60) + 1
+            raise DomainError(
+                "refuel_cooldown",
+                f"Заправка будет доступна через {wait_min} мин.",
+                details={"wait_sec": int(cooldown - elapsed)},
+            )
+
+    price = int(await stores.get_param(session, "workshop.refuel_price_quant", 500))
+    await economy.debit(session, character, economy.QUANT, price, reason="refuel")
+    ship.fuel = capacity
+    character.last_refuel_at = now
+    await session.flush()
+    return ship.fuel, capacity
+
+
 async def running_jobs(session: AsyncSession, character: Character) -> list[CraftJob]:
     return list(
         (

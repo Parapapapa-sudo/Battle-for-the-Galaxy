@@ -38,6 +38,11 @@ async def _require_port(session: AsyncSession, character: Character) -> None:
         raise DomainError("not_in_port", "Это доступно только в космопорту.")
 
 
+async def has_active_subscription(session: AsyncSession, character: Character) -> bool:
+    """Есть ли активная подписка (бонусы: заправка ×2 быстрее и т.п.)."""
+    return await _active_subscription(session, character) is not None
+
+
 async def _active_subscription(session: AsyncSession, character: Character) -> Subscription | None:
     return await session.scalar(
         sa.select(Subscription).where(

@@ -157,10 +157,10 @@ async def keyboard_for_character(
             # разделы — в мини-апп (open_app с hash); действия с модулями — там же
             ws_rows: list[list[Any]] = [
                 [("app:equip", t("kb_mods", lang)), ("app:craft", t("kb_craft_app", lang))],
-                [("app:inv", t("kb_inv", lang)), ("app:ship", t("kb_ship", lang))],
+                [("app:inv", t("kb_inv", lang)), ("refuel", t("kb_refuel", lang))],
             ]
         else:  # без мини-аппа — прежние текстовые экраны
-            ws_rows = [["mods", "recipes"], ["inv", "ship"]]
+            ws_rows = [["mods", "recipes"], ["inv", "refuel"]]
         ws_rows += transfer_rows
         ws_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(ws_rows, lang)

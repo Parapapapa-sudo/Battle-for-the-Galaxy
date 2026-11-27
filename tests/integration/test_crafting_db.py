@@ -80,6 +80,71 @@ async def test_craft_missing_materials_nothing_consumed(session, seeded):
 
 
 @requires_db
+async def test_refuel_price_cooldown_and_subscription(session, seeded):
+    """Заправка: полный бак за 500 квантов, кулдаун 2ч; подписка делит его на 2."""
+    from datetime import UTC, datetime, timedelta
+
+    from app import economy, market
+    from app.models_game import Subscription
+
+    character = await _character(session, seeded)  # hall=workshop, топливо 50 из 50
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.fuel = 10
+    await economy.credit(session, character, economy.QUANT, 1000, reason="test")
+    await session.flush()
+
+    # полный бак заправлять нельзя
+    ship.fuel = 50
+    await session.flush()
+    with pytest.raises(DomainError) as exc_info:
+        await crafting.refuel(session, character)
+    assert exc_info.value.code == "fuel_full"
+
+    # заправка: −500 квантов, бак полный, кулдаун запущен
+    ship.fuel = 10
+    await session.flush()
+    fuel, cap = await crafting.refuel(session, character)
+    assert (fuel, cap) == (50, 50)
+    wallet = await economy.get_wallet(session, character.id, economy.QUANT)
+    assert wallet.balance == 500
+    with pytest.raises(DomainError) as exc_info:
+        await crafting.refuel(session, character)  # бак полон И кулдаун
+    assert exc_info.value.code == "fuel_full"
+
+    # кулдаун: 2 часа без подписки
+    ship.fuel = 10
+    character.last_refuel_at = datetime.now(UTC) - timedelta(hours=1)
+    await session.flush()
+    with pytest.raises(DomainError) as exc_info:
+        await crafting.refuel(session, character)
+    assert exc_info.value.code == "refuel_cooldown"
+
+    # с подпиской кулдаун вдвое короче: час прошёл — можно
+    session.add(
+        Subscription(
+            character_id=character.id,
+            kind="sub_7",
+            started_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        )
+    )
+    await session.flush()
+    assert await market.has_active_subscription(session, character)
+    fuel, _ = await crafting.refuel(session, character)
+    assert fuel == 50
+
+    # вне Мастерской заправка недоступна
+    character.hall = "main"
+    ship.fuel = 10
+    character.last_refuel_at = None
+    await session.flush()
+    with pytest.raises(DomainError) as exc_info:
+        await crafting.refuel(session, character)
+    assert exc_info.value.code == "not_in_workshop"
+
+
+@requires_db
 async def test_craft_and_uninstall_require_workshop(session, seeded):
     """Крафт и снятие модулей недоступны вне Мастерской (ТЗ заказчика)."""
     character = await _character(session, seeded, scrap=10)

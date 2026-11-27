@@ -119,15 +119,15 @@ async def test_port_halls_navigation(session, seeded):
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    # разделы ведут в мини-апп; действий с модулями в чате больше нет
+    # разделы ведут в мини-апп; «О корабле» убрана; «Заправиться» — командой
     assert rows == [
         ["Модули", "Крафт"],
-        ["Инвентарь", "О корабле"],
+        ["Инвентарь", "⛽ Заправиться"],
         ["В основной зал"],
     ]
     payloads = [b["action"] for row in kb["buttons"] for b in row]
     app_actions = [a for a in payloads if a.get("type") == "open_app"]
-    assert {a["hash"] for a in app_actions} == {"equip", "craft", "inv", "ship"}
+    assert {a["hash"] for a in app_actions} == {"equip", "craft", "inv"}
 
     # штаб: задания/магазин + кнопки действий (принятие задания, покупки) с пагинацией
     character.hall = "hq"

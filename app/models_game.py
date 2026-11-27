@@ -95,6 +95,10 @@ class Character(Base, TimestampMixin):
     hall_page: Mapped[int] = mapped_column(default=0)  # страница кнопок зала (пагинация «Далее ▶»)
     # отслеживаемое задание (код): прогресс приходит в чат при каждом изменении
     tracked_quest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # последняя заправка в Мастерской (кулдаун; с подпиской — вдвое короче)
+    last_refuel_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Reputation(Base):

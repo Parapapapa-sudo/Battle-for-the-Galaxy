@@ -884,6 +884,15 @@ async def cmd_page(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     return CommandResult(message=t(HALL_TITLES.get(hall, "hall_main"), lang))
 
 
+async def cmd_refuel(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
+    """Заправка в Мастерской: полный бак за кванты, кулдаун 2ч (подписка — 1ч)."""
+    character = await _load(session, ctx)
+    lang = character.lang
+    price = int(await stores.get_param(session, "workshop.refuel_price_quant", 500))
+    fuel, capacity = await crafting.refuel(session, character)
+    return CommandResult(message=t("refuel_ok", lang, fuel=fuel, cap=capacity, price=price))
+
+
 async def cmd_patch(session: AsyncSession, ctx: CommandContext, args: dict[str, Any]) -> CommandResult:
     character = await _load(session, ctx)
     delay = await expeditions.start_patch(session, character)
@@ -1090,6 +1099,8 @@ CHARACTER_COMMANDS: dict[str, Any] = {
     "вылет": cmd_launch,
     "hall": cmd_hall,
     "page": cmd_page,
+    "refuel": cmd_refuel,
+    "заправиться": cmd_refuel,
     "go": cmd_go,
     "дальше": cmd_go,
     "choice": cmd_choice,

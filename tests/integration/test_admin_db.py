@@ -271,7 +271,7 @@ async def test_config_sections_save_and_validate(session, seeded):
 
     data = await admin.get_config_sections(session, owner)
     ids = [s["id"] for s in data["sections"]]
-    assert ids == ["character", "expedition", "combat", "economy", "factions"]
+    assert ids == ["character", "expedition", "workshop", "combat", "economy", "factions"]
     with pytest.raises(DomainError) as exc_info:
         await admin.get_config_sections(session, mod)
     assert exc_info.value.code == "forbidden"

@@ -785,6 +785,10 @@ CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int 
         ("danger.low_max", "Опасность «низкая»: до", "int", 1, 10),
         ("danger.high_min", "Опасность «высокая»: от", "int", 1, 10),
     ]),
+    "workshop": ("Мастерская", [
+        ("workshop.refuel_price_quant", "Цена заправки, Квантов", "int", 0, 1000000),
+        ("workshop.refuel_cooldown_sec", "Кулдаун заправки, сек (подписка ÷2)", "int", 0, 604800),
+    ]),
     "combat": ("Бой", [
         ("combat.retreat_chance_pct", "Шанс отступления, %", "int", 0, 100),
         ("combat.retreat_damage_chance_pct", "Шанс урона при отступлении, %", "int", 0, 100),
