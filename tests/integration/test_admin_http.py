@@ -152,6 +152,16 @@ async def test_miniapp_sections_api(http_seeded):
             st = r.json()
             assert st["faction"] == "Вольная Лига" and st["expeditions_total"] == 0
 
+            # валюта в /api/me (панель трат) и графический крафт
+            r = await client.get("/api/me", headers=h)
+            assert "eon" in r.json() and "quant" in r.json()
+            r = await client.get("/api/recipes", headers=h)
+            rc = r.json()
+            nano = next(x for x in rc["recipes"] if x["code"] == "craft_nano_patch")
+            assert nano["can_craft"] is True  # стартового лома хватает
+            assert nano["materials"][0]["name"] == "Металлолом"
+            assert rc["jobs"] == [] and rc["slots_total"] >= 1
+
             # действие из мини-аппа идёт через игровой конвейер команд
             r = await client.post("/api/action", json={"cmd": "me"}, headers=h)
             assert r.status_code == 200 and "👤" in r.json()["message"]

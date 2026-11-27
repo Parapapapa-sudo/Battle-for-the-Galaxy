@@ -11,6 +11,20 @@ from fastapi.responses import FileResponse, HTMLResponse
 router = APIRouter(tags=["miniapp-frontend"])
 
 
+@router.get("/fonts/{filename}")
+async def font_file(filename: str) -> FileResponse:
+    """Шрифты мини-аппа (assets/fonts/Arounder.woff2|.ttf)."""
+    import re
+    from pathlib import Path
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.(woff2|ttf|otf)", filename):
+        raise HTTPException(status_code=404, detail="not found")
+    path = Path("assets/fonts") / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=604800"})
+
+
 @router.get("/icons/{group}/{filename}")
 async def icon_file(group: str, filename: str) -> FileResponse:
     """Раздача иконок предметов/товаров (assets/icons/<группа>/<код>.png)."""
@@ -35,9 +49,15 @@ PAGE = """<!doctype html>
 <title>Battle for the Galaxy</title>
 <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
 <style>
+@font-face {
+  font-family: "Arounder";
+  src: url("/fonts/Arounder.woff2") format("woff2"),
+       url("/fonts/Arounder.ttf") format("truetype");
+  font-display: swap;
+}
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+body { font-family: "Arounder", -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #0b1020; color: #e7ecf5; min-height: 100vh; }
 header { position: sticky; top: 0; z-index: 5;
   background: rgba(16, 23, 54, 0.72);
@@ -112,6 +132,15 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
 .quest .qp { font-size: 12px; color: #9fb4ff; }
 .badge { font-size: 10px; padding: 1px 7px; border-radius: 10px; margin-left: 6px; }
 .badge.avail { background: #2f6f4f; color: #d7ffe7; }
+.walletbar { display: flex; gap: 14px; justify-content: center; padding: 8px 12px;
+  margin-bottom: 12px; border-radius: 12px;
+  background: rgba(20, 27, 49, 0.42); border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  font-size: 14px; font-weight: 600; }
+.mat { display: inline-flex; align-items: center; gap: 4px; margin: 2px 8px 2px 0;
+  font-size: 12px; color: #cdd7ee; }
+.mat.lack { color: #ff9d9d; }
+.mat img { width: 18px; height: 18px; object-fit: contain; }
 </style>
 </head>
 <body>
@@ -127,6 +156,7 @@ if (typeof vkBridge !== "undefined") { vkBridge.send("VKWebAppInit"); }
 
 const SECTIONS = [
   ["ship", "🚀", "Корабль"],
+  ["craft", "🧪", "Крафт"],
   ["shop", "🛒", "Магазин"],
   ["journal", "📜", "Журнал"],
   ["stats", "📊", "Статистика"],
@@ -174,13 +204,18 @@ function renderNav() {
 function go(section) { SECTION = section; SHIP_TAB = "info"; TOAST = ""; render(); }
 function goShipTab(tab) { SHIP_TAB = tab; TOAST = ""; render(); }
 function toast() { return TOAST ? `<div class="toast">${TOAST}</div>` : ""; }
+async function walletBar() {
+  const me = await loadMe();
+  return `<div class="walletbar"><span>💎 ${me.eon}</span><span>🪙 ${me.quant}</span></div>`;
+}
 function row(k, v) { return `<div class="row"><span>${k}</span><span>${v}</span></div>`; }
 function card(title, html) { return `<div class="card"><h2>${title}</h2>${html}</div>`; }
 
 // --- Корабль: общая информация -------------------------------------------------
 async function viewShipInfo() {
   const me = await loadMe();
-  let html = card("👤 Капитан", row("Ник", me.name));
+  let html = await walletBar();
+  html += card("👤 Капитан", row("Ник", me.name));
   if (me.ship) {
     const s = me.ship;
     const status = { dock: "космопорт", expedition: "экспедиция", returning: "возвращение", battle: "бой" }[s.status] || s.status;
@@ -222,7 +257,8 @@ async function viewEquipment() {
     `<div class="slot free" onclick="openSlotPicker('${kind}')" title="Установить модуль">＋</div>`).join("");
   const shipFree = Math.max(0, (eq.ship_slots_total || 0) - eq.ship_slots.length);
   const crewFree = Math.max(0, (eq.crew_slots_total || 0) - eq.crew_skills.length);
-  return card("🛠 Оснащение корабля",
+  return await walletBar()
+    + card("🛠 Оснащение корабля",
       `<div class="grid">${eq.ship_slots.map(m => cell(m, "ship")).join("")}${free("ship", shipFree)}</div>`)
     + card("👥 Команда (навыки)",
       `<div class="grid">${eq.crew_skills.map(m => cell(m, "crew")).join("")}${free("crew", crewFree)}</div>`)
@@ -296,6 +332,35 @@ async function openItem(code) {
   $c().innerHTML = html;
 }
 
+// --- Крафт -----------------------------------------------------------------------
+async function viewCraft() {
+  const d = await api("/api/recipes");
+  let html = await walletBar();
+  if (d.jobs.length) {
+    html += card("🛠 Производство (" + d.jobs.length + "/" + d.slots_total + ")",
+      d.jobs.map(j => `<div class="quest"><div class="qn">${j.name} <span class="qp">до ${j.finishes_at}</span></div>
+        <button class="btn ghost" onclick="act('craftcancel ${j.idx}')">Отменить</button></div>`).join(""));
+  }
+  html += d.recipes.map(r => {
+    const mats = r.materials.map(m =>
+      `<span class="mat ${m.have < m.need ? "lack" : ""}">${m.icon ? `<img src="${m.icon}">` : ""}${m.name} ${Math.min(m.have, m.need)}/${m.need}</span>`
+    ).join("");
+    return `<div class="card">
+      <div style="display:flex;gap:12px;align-items:center">
+        <div style="font-size:34px">${r.result.icon ? `<img src="${r.result.icon}" style="width:44px;height:44px;object-fit:contain">` : "🧪"}</div>
+        <div style="flex:1">
+          <div class="qn" style="font-size:15px;font-weight:700">«${r.name}»</div>
+          <div class="note">${r.result.qty}× ${r.result.name} · ${r.duration_sec} с</div>
+        </div>
+      </div>
+      <div style="margin:8px 0">${mats}</div>
+      <button class="btn" ${r.can_craft ? "" : "disabled style='opacity:.4'"}
+        onclick="act('craft ${r.code}')">${r.can_craft ? "Создать" : "Не хватает материалов"}</button>
+    </div>`;
+  }).join("");
+  return html;
+}
+
 // --- Магазин --------------------------------------------------------------------
 async function viewShop() {
   const shop = await api("/api/shop");
@@ -364,7 +429,8 @@ async function render() {
         `<button class="${SHIP_TAB === id ? "active" : ""}" onclick="goShipTab('${id}')">${label}</button>`).join("") + `</div>`;
       html += SHIP_TAB === "info" ? await viewShipInfo()
         : SHIP_TAB === "inv" ? await viewInventory() : await viewEquipment();
-    } else if (SECTION === "shop") html += await viewShop();
+    } else if (SECTION === "craft") html += await viewCraft();
+    else if (SECTION === "shop") html += await viewShop();
     else if (SECTION === "journal") html += await viewJournal();
     else html += await viewStats();
     $c().innerHTML = html;

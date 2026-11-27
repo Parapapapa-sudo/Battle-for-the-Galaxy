@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import battles, characters, modules
+from app import battles, characters, crafting, modules
 from app.config import Settings
 from app.db import session_factory, transactional
 from app.models_game import Battle, Character, Expedition, Ship
@@ -92,11 +92,16 @@ async def me(
                 Expedition.status.in_(["active", "returning"]),
             )
         )
+        from app import economy
         from app.images import icon_url
 
+        eon_wallet = await economy.get_wallet(session, character.id, economy.EON)
+        quant_wallet = await economy.get_wallet(session, character.id, economy.QUANT)
         return {
             "name": character.name,
             "app_bg": icon_url("ui", "app_bg"),
+            "eon": eon_wallet.balance,
+            "quant": quant_wallet.balance,
             "xp_pool": character.xp_pool,
             "inventory_size": character.inventory_size,
             "ship": (
@@ -247,6 +252,37 @@ async def shop(character: Character = Depends(current_character)) -> dict[str, A
                 }
                 for o in offers
             ]
+        }
+
+
+@router.get("/recipes")
+async def recipes(character: Character = Depends(current_character)) -> dict[str, Any]:
+    """Рецепты для графического крафта: материалы есть/нужно, доступность, заказы."""
+    from app.images import icon_url
+
+    async with session_factory() as session, transactional(session):
+        rows = await crafting.list_recipes(session, character)
+        for r in rows:
+            r["result"]["icon"] = icon_url("items", r["result"]["code"])
+            for m in r["materials"]:
+                m["icon"] = icon_url("items", m["code"])
+        jobs = await crafting.running_jobs(session, character)
+        from app.models_game import RecipeTemplate
+
+        jobs_out = []
+        for idx, job in enumerate(jobs, start=1):
+            recipe = await session.get(RecipeTemplate, job.recipe_id)
+            jobs_out.append(
+                {
+                    "idx": idx,
+                    "name": recipe.name if recipe else "?",
+                    "finishes_at": f"{job.finishes_at:%H:%M}",
+                }
+            )
+        return {
+            "recipes": rows,
+            "jobs": jobs_out,
+            "slots_total": character.craft_slots,
         }
 
 
