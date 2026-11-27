@@ -36,8 +36,18 @@ async def add_outbox(
     platform: str | None = None,
     payload: Params | None = None,
 ) -> None:
+    # next_attempt_at — с клиентских часов: на Windows datetime.now() грубее
+    # часов PostgreSQL на тик (~15 мс), и свежее сообщение с server_default
+    # now() могло «не наступить» для первого же fetch (мигал тесты и задерживал
+    # первую попытку доставки).
     session.add(
-        Outbox(character_id=character_id, text=text, platform=platform, payload=payload)
+        Outbox(
+            character_id=character_id,
+            text=text,
+            platform=platform,
+            payload=payload,
+            next_attempt_at=datetime.now(UTC),
+        )
     )
 
 
