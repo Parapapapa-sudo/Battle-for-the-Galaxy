@@ -174,11 +174,12 @@ section.active { display: block; }
       <label><input type="checkbox" id="it-losable"> Теряется при поражении</label>
     </div>
     <div class="formrow">
-      <input id="it-drop-weight" type="number" min="0" max="100" placeholder="Вероятность выпадения, %" title="Вероятность выпадения в экспедиции, %">
+      <input id="it-drop-weight" type="number" min="0" max="100" placeholder="Дроп в экспедиции, %" title="Вероятность выпадения после события экспедиции, %">
+      <input id="it-battle-drop" type="number" min="0" max="100" placeholder="Дроп в бою, %" title="Вероятность выпадения при победе в бою, %">
       <input id="it-qty-min" type="number" min="1" placeholder="Количество: от" title="Количество выпадаемых предметов: от">
       <input id="it-qty-max" type="number" min="1" placeholder="Количество: до" title="Количество выпадаемых предметов: до">
     </div>
-    <div class="note">Вероятность (0–100%) и диапазон количества — бонусный дроп после события экспедиции; 0% — предмет не выпадает.</div>
+    <div class="note">Вероятности (0–100%): дроп после события экспедиции и дроп при победе в бою; 0% — не выпадает. Диапазон количества общий.</div>
     <div class="formrow" style="margin-top:8px"><input id="it-params" placeholder='Параметры JSON, напр. {"heal": 15}'></div>
     <div class="formrow">
       <button class="ghost" onclick="cancelItem()">Отменить</button>
@@ -606,6 +607,7 @@ function clearItemForm() {
   $("it-tradable").checked = true;
   $("it-losable").checked = false;
   $("it-drop-weight").value = 0;
+  $("it-battle-drop").value = 0;
   $("it-qty-min").value = 1;
   $("it-qty-max").value = 1;
 }
@@ -623,6 +625,7 @@ function fillItemForm() {
   $("it-tradable").checked = it.tradable;
   $("it-losable").checked = it.losable_on_defeat;
   $("it-drop-weight").value = it.drop_weight;
+  $("it-battle-drop").value = it.battle_drop_weight;
   $("it-qty-min").value = it.drop_qty_min;
   $("it-qty-max").value = it.drop_qty_max;
   $("it-params").value = Object.keys(it.params || {}).length ? JSON.stringify(it.params) : "";
@@ -645,6 +648,7 @@ function collectItemForm() {
     tradable: $("it-tradable").checked,
     losable_on_defeat: $("it-losable").checked,
     drop_weight: Number($("it-drop-weight").value || 0),
+    battle_drop_weight: Number($("it-battle-drop").value || 0),
     drop_qty_min: Number($("it-qty-min").value || 1),
     drop_qty_max: Number($("it-qty-max").value || 1),
     params,

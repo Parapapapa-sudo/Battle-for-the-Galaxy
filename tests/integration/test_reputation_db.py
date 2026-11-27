@@ -201,6 +201,47 @@ async def test_neutral_faction_not_joinable(session, seeded):
 
 
 @requires_db
+async def test_victory_grants_quants_and_item_drops(session, seeded):
+    """Победа: всегда кванты (диапазон конфига) + дроп предметов по их % (админка)."""
+    from app import economy
+    from app.models_game import ItemTemplate
+
+    character = await _character(session, seeded)
+    # настраиваем предмет: 100% дроп в бою, 2 шт
+    tpl = await session.scalar(sa.select(ItemTemplate).where(ItemTemplate.code == "trinium_ore"))
+    assert tpl is not None
+    tpl.battle_drop_weight = 100
+    tpl.drop_qty_min = tpl.drop_qty_max = 2
+    await session.flush()
+
+    ship = await session.get(Ship, character.id)
+    assert ship is not None
+    ship.base_max_hull = 2000
+    ship.current_hull = 2000
+    await session.flush()
+    before = (await economy.get_wallet(session, character.id, economy.QUANT)).balance
+
+    battle = await battles.start_battle(session, character, enemy_code="pirate_scout")
+    rng = random.Random(5)
+    for _ in range(60):
+        battle = await battles.player_attack(session, character, rng=rng)
+        if battle.status != "active":
+            break
+    assert battle.status == "won"
+
+    after = (await economy.get_wallet(session, character.id, economy.QUANT)).balance
+    assert 15 <= after - before <= 25  # combat.victory_quant_min/max
+    _, items = await characters.list_inventory(session, character.id)
+    trinium = sum(r.qty for r in items if r.code == "trinium_ore")
+    assert trinium == 2  # гарантированный боевой дроп
+    # строка наград содержит кванты
+    outcome = str(battle.state.get("outcome_message", ""))
+    assert "квантов" in outcome
+    tpl.battle_drop_weight = 0  # откат
+    await session.flush()
+
+
+@requires_db
 async def test_enemy_kill_grants_reputation(session, seeded):
     """Победа над пиратом снижает репутацию с Пиратами (enemy.reputation)."""
     character = await _character(session, seeded)

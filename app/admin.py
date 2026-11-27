@@ -298,6 +298,7 @@ def _item_to_dict(item: ItemTemplate) -> dict[str, Any]:
         "tradable": item.tradable,
         "losable_on_defeat": item.losable_on_defeat,
         "drop_weight": item.drop_weight,
+        "battle_drop_weight": item.battle_drop_weight,
         "drop_qty_min": item.drop_qty_min,
         "drop_qty_max": item.drop_qty_max,
         "params": item.params or {},
@@ -351,6 +352,7 @@ def _validate_item(data: dict[str, Any], *, create: bool) -> dict[str, Any]:
 
     stack_limit = _int("stack_limit", 1, 1, 1_000_000)
     drop_weight = _int("drop_weight", 0, 0, 100)
+    battle_drop_weight = _int("battle_drop_weight", 0, 0, 100)
     drop_qty_min = _int("drop_qty_min", 1, 1, 1_000_000)
     drop_qty_max = _int("drop_qty_max", 1, 1, 1_000_000)
     if drop_qty_max < drop_qty_min:
@@ -373,6 +375,7 @@ def _validate_item(data: dict[str, Any], *, create: bool) -> dict[str, Any]:
         "tradable": bool(data.get("tradable", True)),
         "losable_on_defeat": bool(data.get("losable_on_defeat", False)),
         "drop_weight": drop_weight,
+        "battle_drop_weight": battle_drop_weight,
         "drop_qty_min": drop_qty_min,
         "drop_qty_max": drop_qty_max,
         "params": params,
@@ -909,6 +912,8 @@ CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int 
         ("combat.consumables_per_turn", "Расходников за ход", "int", 0, 10),
         ("combat.chance_low_max", "Шанс «низкий»: до, %", "int", 0, 100),
         ("combat.chance_high_min", "Шанс «высокий»: от, %", "int", 0, 100),
+        ("combat.victory_quant_min", "Кванты за победу: от", "int", 0, 100000),
+        ("combat.victory_quant_max", "Кванты за победу: до", "int", 0, 100000),
         ("combat.allowed_consumables", "Разрешённые расходники (JSON-список)", "json", None, None),
     ]),
     "economy": ("Экономика и рынок", [

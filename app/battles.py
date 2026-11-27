@@ -232,13 +232,38 @@ async def _finish_win(
             gained.append(f"{given}× {grant['code']}")
 
     character.xp_pool += loadout.xp
+    # кванты за победу — всегда (ТЗ), диапазон из конфига
+    from app import economy, stores
+
+    q_min = int(await stores.get_param(session, "combat.victory_quant_min", 15))
+    q_max = int(await stores.get_param(session, "combat.victory_quant_max", 25))
+    quant_reward = rng.randint(min(q_min, q_max), max(q_min, q_max))
+    await economy.credit(
+        session, character, economy.QUANT, quant_reward, reason="battle_victory"
+    )
+    # боевой дроп предметов: % каждого предмета настраивается в редакторе предметов
+    for item_tpl in (
+        await session.scalars(
+            sa.select(ItemTemplate)
+            .where(ItemTemplate.battle_drop_weight > 0)
+            .order_by(ItemTemplate.code)
+        )
+    ).all():
+        if rng.random() * 100 >= item_tpl.battle_drop_weight:
+            continue
+        qty = rng.randint(item_tpl.drop_qty_min, max(item_tpl.drop_qty_min, item_tpl.drop_qty_max))
+        given = await characters.grant_items(
+            session, character, code=item_tpl.code, qty=qty, allow_loss=True
+        )
+        if given > 0:
+            gained.append(f"{given}× {item_tpl.code}")
     # репутация за убийство врага: прибавка одним фракциям, минус другим (ТЗ)
     from app import reputation as reputation_app
 
     rep_lines = await reputation_app.apply_deltas(
         session, character, battle.enemy_snapshot.get("reputation") or {}, lang
     )
-    rewards = [f"+{loadout.xp} опыта"] + gained + rep_lines
+    rewards = [f"+{loadout.xp} опыта", f"+{quant_reward} квантов"] + gained + rep_lines
     ship_inv, inv_rows = await characters.list_inventory(session, character.id)
     free = (ship_inv.size_limit or 0) - len(inv_rows)
     final_message = "\n\n".join(

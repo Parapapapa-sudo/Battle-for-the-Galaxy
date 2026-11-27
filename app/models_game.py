@@ -199,6 +199,9 @@ class ItemTemplate(Base, TimestampMixin):
     losable_on_defeat: Mapped[bool] = mapped_column(default=False)
     # бонусный дроп после события экспедиции (админ-панель): шанс %, 0 = не выпадает
     drop_weight: Mapped[int] = mapped_column(default=0)
+    # дроп при победе в бою (админ-панель): шанс %, 0 = не выпадает;
+    # количество — общий диапазон drop_qty_min/max
+    battle_drop_weight: Mapped[int] = mapped_column(default=0)
     drop_qty_min: Mapped[int] = mapped_column(default=1)
     drop_qty_max: Mapped[int] = mapped_column(default=1)
     params: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)  # {"heal": 15} и т.п.
