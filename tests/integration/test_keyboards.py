@@ -107,11 +107,14 @@ async def test_port_halls_navigation(session, seeded):
     """Залы космопорта: основной (вход после экспедиции), мастерская, штаб."""
     character = await _character(session, seeded)
 
-    # основной зал — по умолчанию
+    # основной зал — по умолчанию; «Осмотреть корабль» открывает мини-апп
     kb = await keyboard_for_character(session, character.id)
     assert kb is not None
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
-    assert rows == [["Экспедиция", "О игроке"], ["Мастерская", "Штаб"]]
+    assert rows == [["Экспедиция", "🚀 Осмотреть корабль"], ["Мастерская", "Штаб"]]
+    inspect = kb["buttons"][0][1]["action"]
+    assert inspect.get("type") == "open_app" and inspect.get("hash") == "ship"
+    assert not any("О игроке" in label for row in rows for label in row)
 
     # мастерская: навигация + кнопки действий с пагинацией («Далее ▶»)
     character.hall = "workshop"
@@ -121,8 +124,9 @@ async def test_port_halls_navigation(session, seeded):
     rows = [[b["action"]["label"] for b in row] for row in kb["buttons"]]
     # разделы ведут в мини-апп; «О корабле» убрана; «Заправиться» — командой
     assert rows == [
+        ["⛽ Заправиться"],
         ["Модули", "Крафт"],
-        ["Инвентарь", "⛽ Заправиться"],
+        ["Инвентарь"],
         ["В основной зал"],
     ]
     payloads = [b["action"] for row in kb["buttons"] for b in row]

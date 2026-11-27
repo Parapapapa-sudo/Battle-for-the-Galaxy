@@ -156,11 +156,12 @@ async def keyboard_for_character(
         if get_settings().vk_app_id:
             # разделы — в мини-апп (open_app с hash); действия с модулями — там же
             ws_rows: list[list[Any]] = [
+                [("refuel", t("kb_refuel", lang))],
                 [("app:equip", t("kb_mods", lang)), ("app:craft", t("kb_craft_app", lang))],
-                [("app:inv", t("kb_inv", lang)), ("refuel", t("kb_refuel", lang))],
+                [("app:inv", t("kb_inv", lang))],
             ]
         else:  # без мини-аппа — прежние текстовые экраны
-            ws_rows = [["mods", "recipes"], ["inv", "refuel"]]
+            ws_rows = [["refuel"], ["mods", "recipes"], ["inv"]]
         ws_rows += transfer_rows
         ws_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(ws_rows, lang)
@@ -189,8 +190,15 @@ async def keyboard_for_character(
             hq_rows.append([("page next", t("kb_page_next", lang, n=page + 1, total=total))])
         hq_rows.append([("hall main", t("kb_hall_main", lang))])
         return vk_keyboard(hq_rows, lang)
+    from app.config import get_settings
+
+    inspect_btn: Any = (
+        ("app:ship", t("kb_inspect_ship", lang))
+        if get_settings().vk_app_id
+        else ("ship", t("kb_inspect_ship", lang))  # без мини-аппа — текстовая карточка
+    )
     main_rows: list[list[Any]] = [
-        ["launch", "me"],
+        ["launch", inspect_btn],
         [("hall workshop", t("kb_workshop", lang)), ("hall hq", t("kb_hq", lang))],
     ]
     main_rows += transfer_rows
