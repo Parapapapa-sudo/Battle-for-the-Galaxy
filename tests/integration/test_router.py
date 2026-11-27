@@ -277,10 +277,24 @@ async def test_hall_navigation_commands(session, seeded, sessions):
         text="hall main", idempotency_key=_key(),
     )
     assert "Основной зал" in r.message
-    # «кнопка»-ссылка на мини-апп в тексте сообщения (vk_app_id настроен)
-    assert "Осмотреть корабль" in r.message and "vk.com/app54921050#ship" in r.message
+    assert "Осмотреть корабль" not in r.message  # кнопка — отдельным сообщением (inline)
     await session.refresh(character)
     assert character.hall == "main"
+    # в outbox — сообщение с inline-кнопкой (open_link на мини-апп)
+    from app.models import Outbox
+
+    inline_rows = (
+        await session.scalars(
+            sa.select(Outbox).where(
+                Outbox.character_id == character.id,
+                Outbox.payload["inline_link_button"].is_not(None),
+            )
+        )
+    ).all()
+    assert inline_rows
+    btn = inline_rows[-1].payload["inline_link_button"]
+    assert btn["label"] == "🚀 Осмотреть корабль"
+    assert btn["url"] == "https://vk.com/app54921050#ship"
 
     # несуществующий зал
     r = await route_text_command(

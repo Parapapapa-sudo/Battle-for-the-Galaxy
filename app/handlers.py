@@ -870,13 +870,22 @@ async def cmd_hall(session: AsyncSession, ctx: CommandContext, args: dict[str, A
     await session.flush()
     message = t(HALL_TITLES[hall], lang)
     if hall == "main":
-        # «кнопка»-ссылка на мини-апп прямо в тексте (кликабельный vk.com/app…)
+        # кнопка ВНУТРИ сообщения — inline-клавиатура (open_link с ↗);
+        # у сообщения одна клавиатура, поэтому кнопка едет отдельным пузырём следом
         from app.config import get_settings
 
         app_id = get_settings().vk_app_id
         if app_id:
-            message += "\n\n" + t(
-                "inspect_ship_link", lang, url=f"https://vk.com/app{app_id}#ship"
+            await stores.add_outbox(
+                session,
+                character_id=character.id,
+                text=t("inspect_ship_text", lang),
+                payload={
+                    "inline_link_button": {
+                        "label": t("kb_inspect_ship", lang),
+                        "url": f"https://vk.com/app{app_id}#ship",
+                    }
+                },
             )
     return CommandResult(message=message, image_pack=f"port_{hall}")
 
