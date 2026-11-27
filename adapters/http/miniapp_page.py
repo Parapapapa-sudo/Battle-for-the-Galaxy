@@ -43,8 +43,6 @@ header { position: sticky; top: 0; z-index: 5;
   background: rgba(16, 23, 54, 0.72);
   backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding: 10px 12px 0; }
-.htitle { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
-.htitle span { color: #8b96ad; font-weight: 400; font-size: 12px; margin-left: 8px; }
 nav { display: flex; gap: 4px; }
 nav button { flex: 1; background: none; border: none; color: #8b96ad; font-size: 12px;
   padding: 8px 2px 10px; cursor: pointer; border-bottom: 2px solid transparent; }
@@ -84,6 +82,8 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
 .slot .qty { position: absolute; right: 4px; bottom: 2px; font-size: 11px; color: #fff;
   background: #4d7cff; border-radius: 8px; padding: 0 5px; font-weight: 700; }
 .slot.empty { cursor: default; opacity: .35; font-size: 18px; }
+.slot.free { border-style: dashed; color: #5b6a8f; font-size: 22px; }
+.slot.free:active { border-color: #4d7cff; color: #9fb4ff; }
 .slot img { width: 78%; height: 78%; object-fit: contain; }
 .bigicon img { width: 96px; height: 96px; object-fit: contain; }
 .slot .lvl { position: absolute; left: 4px; top: 2px; font-size: 10px; color: #ffd479; }
@@ -116,7 +116,6 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
 </head>
 <body>
 <header>
-  <div class="htitle">Battle for the Galaxy<span id="who"></span></div>
   <nav id="nav"></nav>
 </header>
 <main id="content"><div class="card">Загрузка…</div></main>
@@ -135,11 +134,22 @@ const SECTIONS = [
 const SHIP_TABS = [["info", "Общая информация"], ["inv", "Инвентарь"], ["equip", "Оснащение"]];
 const ICONS = { resource: "⛏️", consumable: "💊", module: "🔩", repair_kit: "🧰", special: "💎" };
 const RAR = { common: "обычный", rare: "редкий", epic: "эпический", unique: "уникальный" };
-let SECTION = "ship", SHIP_TAB = "info", TOAST = "";
+let SECTION = "ship", SHIP_TAB = "info", TOAST = "", ME = null;
 
 const $c = () => document.getElementById("content");
 const icon = (cat) => ICONS[cat] || "📦";
 const pic = (url, cat) => url ? `<img src="${url}" alt="">` : icon(cat);
+
+async function loadMe() {
+  if (!ME) {
+    ME = await api("/api/me");
+    if (ME.app_bg) {
+      document.body.style.background =
+        "linear-gradient(rgba(11,16,32,0.55), rgba(11,16,32,0.78)), url('" + ME.app_bg + "') center/cover fixed no-repeat #0b1020";
+    }
+  }
+  return ME;
+}
 
 async function api(path, opts) {
   const r = await fetch(path, { headers: H, ...opts });
@@ -152,6 +162,7 @@ async function act(cmd) {
     const r = await api("/api/action", { method: "POST", body: JSON.stringify({ cmd }) });
     TOAST = r.message;
   } catch (e) { TOAST = "Ошибка: " + e.message; }
+  ME = null;  // состояние могло измениться
   render();
 }
 
@@ -168,9 +179,8 @@ function card(title, html) { return `<div class="card"><h2>${title}</h2>${html}<
 
 // --- Корабль: общая информация -------------------------------------------------
 async function viewShipInfo() {
-  const me = await api("/api/me");
-  document.getElementById("who").textContent = me.name;
-  let html = "";
+  const me = await loadMe();
+  let html = card("👤 Капитан", row("Ник", me.name));
   if (me.ship) {
     const s = me.ship;
     const status = { dock: "космопорт", expedition: "экспедиция", returning: "возвращение", battle: "бой" }[s.status] || s.status;
@@ -208,13 +218,31 @@ async function viewEquipment() {
   const cell = (m) =>
     `<div class="slot" onclick="openItem('${m.code}')" title="${m.name}">
        ${m.icon ? pic(m.icon, m.kind) : (m.kind === "ability" ? "⚡" : "🔩")}<span class="lvl">ур.${m.level}</span></div>`;
-  const grid = (list, emptyText) => list.length
-    ? `<div class="grid">${list.map(cell).join("")}</div>`
-    : `<div class="note">${emptyText}</div>`;
-  return card("🛠 Оснащение корабля", grid(eq.ship_slots, "Нет установленных модулей."))
-    + card("👥 Команда (навыки)", grid(eq.crew_skills, "Навыков пока нет — установите модули способностей."))
-    + (eq.storage.length ? card("🎒 Модули на складе (в инвентаре)", grid(eq.storage, "")) : "")
-    + `<div class="note">Нажмите на модуль, чтобы открыть карточку: снять, прокачать.</div>`;
+  const free = (kind, count) => Array.from({ length: count }, () =>
+    `<div class="slot free" onclick="openSlotPicker('${kind}')" title="Установить модуль">＋</div>`).join("");
+  const shipFree = Math.max(0, (eq.ship_slots_total || 0) - eq.ship_slots.length);
+  const crewFree = Math.max(0, (eq.crew_slots_total || 0) - eq.crew_skills.length);
+  return card("🛠 Оснащение корабля",
+      `<div class="grid">${eq.ship_slots.map(cell).join("")}${free("ship", shipFree)}</div>`)
+    + card("👥 Команда (навыки)",
+      `<div class="grid">${eq.crew_skills.map(cell).join("")}${free("crew", crewFree)}</div>`)
+    + (eq.storage.length ? card("🎒 Модули в инвентаре", `<div class="grid">${eq.storage.map(cell).join("")}</div>`) : "")
+    + `<div class="note">Тап по занятому слоту — карточка модуля; тап по пустому (＋) — выбор, что установить.</div>`;
+}
+
+// выбор модуля в пустой слот: совместимые варианты из инвентаря
+async function openSlotPicker(kind) {
+  const eq = await api("/api/equipment");
+  const fit = eq.storage.filter(m => kind === "crew" ? m.kind === "ability" : m.kind !== "ability");
+  let html = `<button class="back" onclick="render()">← Назад</button>` + toast();
+  html += card(kind === "crew" ? "👥 Навык команды — выбор" : "🛠 Модуль корабля — выбор",
+    fit.length
+      ? fit.map(m => `<div class="quest">
+          <div class="qn">${m.name} <span class="qp">ур. ${m.level}</span></div>
+          <button class="btn" onclick="act('install ${m.code}')">Установить</button></div>`).join("")
+      : `<div class="note">В инвентаре нет подходящих модулей${kind === "crew" ? " со способностями" : ""}.
+         Модули добываются в экспедициях и покупаются.</div>`);
+  $c().innerHTML = html;
 }
 
 // --- Карточка предмета / товара (универсальная) ---------------------------------
@@ -318,7 +346,6 @@ async function render() {
   } catch (e) {
     $c().innerHTML = card("Ошибка", `<div class="err">${e.message}</div>
       <button class="btn ghost" onclick="render()">Обновить</button>`);
-    document.getElementById("who").textContent = "откройте через VK Mini App";
   }
 }
 render();

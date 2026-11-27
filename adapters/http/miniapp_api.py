@@ -92,8 +92,11 @@ async def me(
                 Expedition.status.in_(["active", "returning"]),
             )
         )
+        from app.images import icon_url
+
         return {
             "name": character.name,
+            "app_bg": icon_url("ui", "app_bg"),
             "xp_pool": character.xp_pool,
             "inventory_size": character.inventory_size,
             "ship": (
@@ -203,9 +206,21 @@ async def equipment(character: Character = Depends(current_character)) -> dict[s
         for m in mods:
             m["icon"] = icon_url("items", m["code"])
         installed = [m for m in mods if m["installed"]]
+        ship = await session.get(Ship, character.id)
+        ship_slots_total = 0
+        if ship is not None:
+            from app.models_game import ShipTemplate
+
+            template = await session.get(ShipTemplate, ship.template_id)
+            ship_slots_total = template.module_slots if template else 0
+        from app import stores
+
+        crew_slots_total = int(await stores.get_param(session, "modules.crew_slots", 2))
         return {
             "ship_slots": [m for m in installed if m["kind"] != "ability"],
+            "ship_slots_total": ship_slots_total,
             "crew_skills": [m for m in installed if m["kind"] == "ability"],
+            "crew_slots_total": crew_slots_total,
             "storage": [m for m in mods if not m["installed"]],
         }
 
