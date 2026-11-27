@@ -131,6 +131,8 @@ async def inventory(
             "items": [
                 {**r.__dict__, "icon": icon_url("items", r.code)} for r in rows
             ],
+            # фон инвентаря: assets/icons/ui/inventory_bg.(png|jpg|webp) или null
+            "bg": icon_url("ui", "inventory_bg"),
         }
 
 

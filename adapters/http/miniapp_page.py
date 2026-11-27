@@ -39,8 +39,10 @@ PAGE = """<!doctype html>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #0b1020; color: #e7ecf5; min-height: 100vh; }
-header { position: sticky; top: 0; z-index: 5; background: #101736;
-  border-bottom: 1px solid #232c4d; padding: 10px 12px 0; }
+header { position: sticky; top: 0; z-index: 5;
+  background: rgba(16, 23, 54, 0.72);
+  backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding: 10px 12px 0; }
 .htitle { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .htitle span { color: #8b96ad; font-weight: 400; font-size: 12px; margin-left: 8px; }
 nav { display: flex; gap: 4px; }
@@ -50,16 +52,32 @@ nav button.active { color: #9fb4ff; border-bottom-color: #4d7cff; }
 nav button .ico { display: block; font-size: 18px; margin-bottom: 2px; }
 main { padding: 14px; max-width: 640px; margin: 0 auto; }
 .subtabs { display: flex; gap: 6px; margin-bottom: 12px; }
-.subtabs button { flex: 1; background: #141b31; border: 1px solid #232c4d; color: #8b96ad;
-  border-radius: 8px; padding: 8px 4px; font-size: 12px; cursor: pointer; }
+.subtabs button { flex: 1;
+  background: rgba(20, 27, 49, 0.38);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.10); color: #8b96ad;
+  border-radius: 10px; padding: 8px 4px; font-size: 12px; cursor: pointer; }
 .subtabs button.active { background: #182142; color: #9fb4ff; border-color: #4d7cff; }
-.card { background: #141b31; border: 1px solid #232c4d; border-radius: 12px;
-  padding: 14px; margin-bottom: 12px; }
+.card {
+  background: rgba(20, 27, 49, 0.42);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  padding: 14px; margin-bottom: 12px;
+}
 .card h2 { font-size: 13px; color: #9fb4ff; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
 .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .row span:last-child { color: #cdd7ee; }
 .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.slot { aspect-ratio: 1; background: #0d1330; border: 1px solid #232c4d; border-radius: 10px;
+.slot { aspect-ratio: 1;
+  background: rgba(13, 19, 48, 0.38);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   display: flex; align-items: center; justify-content: center; position: relative;
   font-size: 26px; cursor: pointer; }
 .slot:active { border-color: #4d7cff; }
@@ -80,7 +98,8 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
 .chips { text-align: center; margin-bottom: 6px; }
 .btn { display: block; width: 100%; padding: 12px; margin-top: 8px; border: none; border-radius: 10px;
   background: linear-gradient(90deg,#4d7cff,#9b5bff); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
-.btn.ghost { background: #1b2444; border: 1px solid #2a3560; }
+.btn.ghost { background: rgba(27, 36, 68, 0.5); border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .back { background: none; border: none; color: #9fb4ff; font-size: 14px; cursor: pointer; padding: 4px 0 10px; }
 .note { color: #8b96ad; font-size: 12px; margin-top: 6px; }
 .err { color: #ff7a7a; font-size: 14px; }
@@ -176,7 +195,10 @@ async function viewInventory() {
   for (let k = inv.items.length; k < Math.min(total, Math.max(10, inv.items.length)); k++) {
     cells += `<div class="slot empty">·</div>`;
   }
-  return card(`📦 Инвентарь (${inv.items.length}/${inv.size_limit || "∞"})`, `<div class="grid">${cells}</div>`)
+  const bgStyle = inv.bg
+    ? ` style="background: linear-gradient(rgba(11,16,32,0.35), rgba(11,16,32,0.55)), url('${inv.bg}') center/cover no-repeat"`
+    : "";
+  return `<div class="card"${bgStyle}><h2>📦 Инвентарь (${inv.items.length}/${inv.size_limit || "∞"})</h2><div class="grid">${cells}</div></div>`
     + `<div class="note">Нажмите на предмет, чтобы открыть его карточку.</div>`;
 }
 
