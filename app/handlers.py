@@ -23,7 +23,6 @@ from app.models_game import (
     FactionEvent,
     FactionEventParticipant,
     RecipeTemplate,
-    Reputation,
 )
 from core.errors import DomainError
 from core.hull import max_hull
@@ -159,24 +158,23 @@ async def cmd_me(session: AsyncSession, ctx: CommandContext, args: dict[str, Any
     character = await _load(session, ctx)
     lang = character.lang
     faction_row = await session.get(Faction, character.faction_id)
-    rep = await session.scalar(
-        sa.select(Reputation).where(
-            Reputation.character_id == character.id, Reputation.is_active
-        )
+    from app import reputation as reputation_app
+
+    rep_block = await reputation_app.describe_reputations(session, character)
+    message = t(
+        "profile",
+        lang,
+        name=character.name,
+        faction=faction_row.name if faction_row else "?",
+        xp=character.xp_pool,
     )
+    if rep_block:
+        message += "\n\n" + t("rep_block_title", lang) + "\n" + rep_block
     return CommandResult(
-        message=t(
-            "profile",
-            lang,
-            name=character.name,
-            faction=faction_row.name if faction_row else "?",
-            rep=rep.value if rep else 0,
-            xp=character.xp_pool,
-        ),
+        message=message,
         data={
             "name": character.name,
             "faction": faction_row.code if faction_row else None,
-            "reputation": rep.value if rep else 0,
             "xp_pool": character.xp_pool,
         },
     )

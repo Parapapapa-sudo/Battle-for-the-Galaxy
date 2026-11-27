@@ -19,7 +19,6 @@ from app.models_game import (
     InventoryItem,
     ItemTemplate,
     ModerationName,
-    Reputation,
     Ship,
     ShipTemplate,
 )
@@ -131,6 +130,11 @@ async def create_character(
     faction = await get_faction_by_code(session, faction_code)
     if faction is None:
         raise DomainError("unknown_faction", f"Неизвестная фракция: {faction_code}")
+    if faction.kind != "main":
+        raise DomainError(
+            "faction_not_joinable",
+            "В эту фракцию нельзя вступить — она нейтральная.",
+        )
 
     character = Character(
         account_id=account_id,
@@ -146,14 +150,10 @@ async def create_character(
     session.add(
         ModerationName(character_id=character.id, name=character.name, verdict="allowed")
     )
-    session.add(
-        Reputation(
-            character_id=character.id,
-            faction_id=faction.id,
-            value=int(await stores.get_param(session, "reputation.start_value", 0)),
-            is_active=True,
-        )
-    )
+    # репутация: своя фракция — старт, остальные MAIN — штраф за вступление (ТЗ)
+    from app import reputation as reputation_app
+
+    await reputation_app.setup_faction_reputations(session, character, faction)
     session.add(
         Inventory(
             character_id=character.id,

@@ -262,7 +262,8 @@ async def keyboard_for_account(session: AsyncSession, account: Any) -> dict[str,
             )
         return vk_keyboard([["intro2"]])
     if step == "intro2":
-        factions = await characters.list_factions(session)
+        # вступать можно только в MAIN-фракции (нейтральные — репутация/торговля)
+        factions = [f for f in await characters.list_factions(session) if f.kind == "main"]
         rows = [
             [(f"join {f.code}", f.name) for f in factions[i : i + 2]]
             for i in range(0, len(factions), 2)

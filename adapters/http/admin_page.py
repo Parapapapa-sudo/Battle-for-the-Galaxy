@@ -115,6 +115,7 @@ section.active { display: block; }
         <option value="quest">Задание</option>
         <option value="recipe">Рецепт</option>
         <option value="ship">Корабль</option>
+        <option value="faction">Фракция</option>
       </select>
       <select id="ce-code" onchange="contentEditFill()" title="Контент"></select>
     </div>
@@ -133,6 +134,7 @@ section.active { display: block; }
         <option value="quest">Задание</option>
         <option value="recipe">Рецепт</option>
         <option value="ship">Корабль</option>
+        <option value="faction">Фракция</option>
       </select>
     </div>
     <div id="ca-form"></div>
@@ -423,6 +425,13 @@ const CONTENT_FIELDS = {
     ["cancel_return_pct", "Возврат материалов при отмене, %", "number"],
     ["status", "Статус", "select", ["published", "draft", "archived"]],
   ],
+  faction: [
+    ["code", "Код (a-z, 0-9, _)", "text"],
+    ["name", "Название", "text"],
+    ["description", "Описание (лор, абзацы через пустую строку)", "textarea"],
+    ["kind", "Вид фракции", "select", ["main", "neutral"]],
+    ["bonuses", 'Бонусы JSON: {"hull_bonus_pct": 5} (пусто — без бонусов)', "json"],
+  ],
   ship: [
     ["code", "Код (a-z, 0-9, _)", "text"],
     ["name", "Название", "text"],
@@ -439,6 +448,7 @@ const CONTENT_DEFAULTS = {
   quest: { kind: "tutorial", chain_order: 0, objectives: [{ type: "event_resolved", count: 1 }], rewards: { quant: 100 }, status: "published" },
   recipe: { result_qty: 1, materials: [{ code: "scrap_metal", qty: 1 }], duration_sec: 60, cancel_return_pct: 50, status: "published" },
   ship: { faction: "", max_hull: 100, fuel_capacity: 50, attack: 5, defense: 5, module_slots: 3 },
+  faction: { kind: "neutral", bonuses: {} },
 };
 let CONTENT = null;
 async function loadContentList() {

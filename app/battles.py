@@ -112,6 +112,7 @@ async def start_battle(
             "max_hull": loadout.hull,
             "passives": loadout.passives,
             "weaknesses": loadout.weaknesses,
+            "reputation": dict(template.reputation or {}),
         },
         player_snapshot={"attack": await effective_attack(session, character)},
         state={
@@ -231,7 +232,13 @@ async def _finish_win(
             gained.append(f"{given}× {grant['code']}")
 
     character.xp_pool += loadout.xp
-    rewards = [f"+{loadout.xp} опыта"] + gained
+    # репутация за убийство врага: прибавка одним фракциям, минус другим (ТЗ)
+    from app import reputation as reputation_app
+
+    rep_lines = await reputation_app.apply_deltas(
+        session, character, battle.enemy_snapshot.get("reputation") or {}, lang
+    )
+    rewards = [f"+{loadout.xp} опыта"] + gained + rep_lines
     ship_inv, inv_rows = await characters.list_inventory(session, character.id)
     free = (ship_inv.size_limit or 0) - len(inv_rows)
     final_message = "\n\n".join(

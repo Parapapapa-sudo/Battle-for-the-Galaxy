@@ -57,6 +57,8 @@ class Faction(Base, TimestampMixin):
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str] = mapped_column(Text, default="")
+    # main — игровые (игроки могут вступать), neutral — только репутация/торговля
+    kind: Mapped[str] = mapped_column(String(16), default="main")
     bonuses: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
     # {"ship_template": code, "items": [{"code": ..., "qty": ...}]}
     start_resources: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
@@ -409,6 +411,11 @@ class EnemyTemplate(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(128))
     stats: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)  # hull, damage, xp
     abilities: Mapped[list[Any]] = mapped_column(MutList, default=list)  # коды enemy_abilities
+    # фракция врага и репутация за победу над ним: {"pirates": -50, ...}
+    faction_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("factions.id", ondelete="SET NULL"), nullable=True
+    )
+    reputation: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
     passives: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
     weaknesses: Mapped[dict[str, Any]] = mapped_column(MutDict, default=dict)
     loot_table_id: Mapped[uuid.UUID | None] = mapped_column(

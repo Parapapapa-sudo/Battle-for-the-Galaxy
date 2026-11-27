@@ -425,6 +425,7 @@ CONTENT_KINDS: dict[str, Any] = {
     "quest": QuestTemplate,
     "recipe": RecipeTemplate,
     "ship": ShipTemplate,
+    "faction": Faction,
 }
 _CONTENT_STATUSES = ("draft", "published", "archived")
 _QUEST_KINDS = ("tutorial", "story")
@@ -432,6 +433,14 @@ _EVENT_KINDS = ("automatic", "interactive")
 
 
 def _content_to_dict(kind: str, row: Any, *, faction_code: str = "") -> dict[str, Any]:
+    if kind == "faction":  # у фракций нет статуса публикации
+        return {
+            "code": row.code,
+            "name": row.name,
+            "description": row.description,
+            "kind": row.kind,
+            "bonuses": row.bonuses or {},
+        }
     if kind == "ship":  # у кораблей нет статуса — поля характеристик плоские
         stats = row.base_stats or {}
         return {
@@ -514,7 +523,7 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
     if not name:
         errors.append("название обязательно")
     fields: dict[str, Any] = {"code": code, "name": name}
-    if kind != "ship":  # у кораблей нет статуса публикации
+    if kind not in ("ship", "faction"):  # у кораблей и фракций нет статуса
         status = str(data.get("status", "published")).strip()
         if status not in _CONTENT_STATUSES:
             errors.append(f"статус: {'|'.join(_CONTENT_STATUSES)}")
@@ -574,6 +583,15 @@ def _validate_content(kind: str, data: dict[str, Any], *, create: bool) -> dict[
             "chain_order": _int("chain_order", 0, 0, 1000),
             "objectives": objectives,
             "rewards": _json("rewards", {}, dict),
+        }
+    elif kind == "faction":
+        fkind = str(data.get("kind", "neutral")).strip()
+        if fkind not in ("main", "neutral"):
+            errors.append("вид фракции: main|neutral")
+        fields |= {
+            "description": str(data.get("description", "")).strip(),
+            "kind": fkind,
+            "bonuses": _json("bonuses", {}, dict),
         }
     elif kind == "ship":
         fields |= {
@@ -710,6 +728,31 @@ async def delete_content(
         raise DomainError("not_found", f"Контент «{code}» не найден.")
     before = _content_to_dict(kind, row)
     mode = "hard"
+    if kind == "faction":
+        from app.models_game import EnemyTemplate
+
+        players = int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(Character).where(
+                    Character.faction_id == row.id
+                )
+            )
+            or 0
+        )
+        enemies = int(
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(EnemyTemplate).where(
+                    EnemyTemplate.faction_id == row.id
+                )
+            )
+            or 0
+        )
+        if players or enemies:
+            raise DomainError(
+                "bad_content",
+                "Ошибка: фракция используется "
+                f"(игроков: {players}, врагов: {enemies}) — удаление невозможно.",
+            )
     if kind == "ship":
         # Ship.template_id → RESTRICT: корабль игрока не даёт удалить шаблон,
         # а архива у кораблей нет — честная ошибка вместо удаления
@@ -762,7 +805,6 @@ CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int 
     "character": ("Базовые параметры персонажа", [
         ("inventory.base_size", "Размер инвентаря (слотов)", "int", 1, 1000),
         ("warehouse.base_size", "Размер склада (слотов)", "int", 1, 1000),
-        ("reputation.start_value", "Стартовая репутация", "int", -1000, 1000),
         ("names.min_length", "Минимальная длина имени", "int", 1, 64),
         ("names.max_length", "Максимальная длина имени", "int", 1, 64),
         ("subscription.inventory_bonus_pct", "Бонус инвентаря по подписке, %", "int", 0, 500),
@@ -784,6 +826,13 @@ CONFIG_SECTIONS: dict[str, tuple[str, list[tuple[str, str, str, int | None, int 
         ("defeat.loss_max_pct", "Потеря добычи при поражении: до, %", "int", 0, 100),
         ("danger.low_max", "Опасность «низкая»: до", "int", 1, 10),
         ("danger.high_min", "Опасность «высокая»: от", "int", 1, 10),
+    ]),
+    "reputation": ("Репутация и фракции", [
+        ("reputation.start_value", "Стартовая репутация со своей фракцией", "int", -100000, 100000),
+        ("faction.join_penalty", "Репутация с остальными игровыми фракциями при вступлении", "int", -100000, 0),
+        ("reputation.hatred_below", "Ненависть: репутация ниже", "int", -1000000, 0),
+        ("reputation.friendly_from", "Дружелюбие: репутация от", "int", 0, 1000000),
+        ("reputation.exalted_from", "Превознесение: репутация от", "int", 0, 10000000),
     ]),
     "workshop": ("Мастерская", [
         ("workshop.refuel_price_quant", "Цена заправки, Квантов", "int", 0, 1000000),

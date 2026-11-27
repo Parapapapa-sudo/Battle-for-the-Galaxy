@@ -265,13 +265,43 @@ async def test_content_editor_ships(session, seeded):
 
 
 @requires_db
+async def test_admin_faction_editor(session, seeded):
+    """Редактор фракций: создание нейтральной, правка, удаление; занятая — защищена."""
+    owner, _, cm = await _admins(session)
+
+    created = await admin.create_content(session, cm, "faction", {
+        "code": "test_guild", "name": "Тестовая гильдия", "kind": "neutral",
+        "description": "Проверка", "bonuses": {"xp_bonus_pct": 3},
+    })
+    assert created["kind"] == "neutral" and created["bonuses"]["xp_bonus_pct"] == 3
+
+    updated = await admin.update_content(session, owner, "faction", "test_guild", {
+        "name": "Гильдия v2", "kind": "main", "bonuses": {},
+    })
+    assert updated["name"] == "Гильдия v2" and updated["kind"] == "main"
+
+    # валидация: кривой вид фракции
+    with pytest.raises(DomainError):
+        await admin.update_content(session, owner, "faction", "test_guild", {
+            "name": "X", "kind": "evil",
+        })
+
+    # пираты заняты врагами — удаление запрещено; тестовая — удаляется
+    with pytest.raises(DomainError) as exc_info:
+        await admin.delete_content(session, owner, "faction", "pirates")
+    assert "используется" in exc_info.value.message
+    result = await admin.delete_content(session, owner, "faction", "test_guild")
+    assert result["mode"] == "hard"
+
+
+@requires_db
 async def test_config_sections_save_and_validate(session, seeded):
     """Вкладки конфигурации: чтение, сохранение, парные валидации, фракции."""
     owner, mod, _ = await _admins(session)
 
     data = await admin.get_config_sections(session, owner)
     ids = [s["id"] for s in data["sections"]]
-    assert ids == ["character", "expedition", "workshop", "combat", "economy", "factions"]
+    assert ids == ["character", "expedition", "reputation", "workshop", "combat", "economy", "factions"]
     with pytest.raises(DomainError) as exc_info:
         await admin.get_config_sections(session, mod)
     assert exc_info.value.code == "forbidden"

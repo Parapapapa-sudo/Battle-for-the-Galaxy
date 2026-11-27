@@ -65,7 +65,13 @@ RU: dict[str, str] = {
         "Если пропали кнопки — напиши ui."
     ),
     # profile / inventory / ship
-    "profile": "👤 {name} — {faction}\n\n⭐ Репутация: {rep}\n\n✨ Опыт (пул): {xp}",
+    "profile": "👤 {name} — {faction}\n\n✨ Опыт (пул): {xp}",
+    "rep_block_title": "⭐ Репутация:",
+    "rep_line": "— {faction}: {value} ({stage})",
+    "rep_hatred": "Ненависть", "rep_hostile": "Враждебность", "rep_neutral": "Нейтралитет",
+    "rep_friendly": "Дружелюбие", "rep_exalted": "Превознесение",
+    "effect_rep": "{delta} репутация: {faction}",
+    "rep_stage_suffix": "({stage})",
     "inv_bad_kind": "Раздел: ship | warehouse | waiting",
     "inv_empty": "📦 Инвентарь пуст.",
     "inv_header": "📦 Инвентарь ({kind}, {used}/{limit}):",
@@ -331,7 +337,13 @@ EN: dict[str, str] = {
         "on your first flight: quests (HQ hall → «Quests») will guide you further.\n"
         "If buttons disappear — type ui."
     ),
-    "profile": "👤 {name} — {faction}\n\n⭐ Reputation: {rep}\n\n✨ XP pool: {xp}",
+    "profile": "👤 {name} — {faction}\n\n✨ XP pool: {xp}",
+    "rep_block_title": "⭐ Reputation:",
+    "rep_line": "— {faction}: {value} ({stage})",
+    "rep_hatred": "Hatred", "rep_hostile": "Hostility", "rep_neutral": "Neutrality",
+    "rep_friendly": "Friendliness", "rep_exalted": "Exaltation",
+    "effect_rep": "{delta} reputation: {faction}",
+    "rep_stage_suffix": "({stage})",
     "inv_bad_kind": "Section: ship | warehouse | waiting",
     "inv_empty": "📦 Inventory is empty.",
     "inv_header": "📦 Inventory ({kind}, {used}/{limit}):",

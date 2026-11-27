@@ -155,6 +155,16 @@ FACTIONS: list[dict[str, Any]] = [
 ]
 
 
+# --- Нейтральные фракции (ТЗ): игроки вступать не могут, репутация/торговля ---
+NEUTRAL_FACTIONS: list[dict[str, Any]] = [
+    {"code": "pirates", "name": "Пираты"},
+    {"code": "helios", "name": "Гелиос"},
+    {"code": "dark_cartel", "name": "Тёмный картель"},
+    {"code": "veil_keepers", "name": "Хранители завесы"},
+    {"code": "red_syndicate", "name": "Красный синдикат"},
+]
+
+
 # --- Заглушки цепочки обучения (ТЗ: первое сюжетное задание обязательно) ---
 QUESTS: list[dict[str, Any]] = [
     dict(
@@ -251,6 +261,8 @@ ENEMY_ABILITIES: list[dict[str, Any]] = [
 ENEMIES: list[dict[str, Any]] = [
     dict(
         code="pirate_scout",
+        faction="pirates",
+        reputation={"pirates": -25},
         category="normal",
         name="Пират-скаут",
         stats={"hull": 40, "damage": 8, "xp": 15},
@@ -261,6 +273,8 @@ ENEMIES: list[dict[str, Any]] = [
     ),
     dict(
         code="pirate_raider",
+        faction="pirates",
+        reputation={"pirates": -50},
         category="dangerous",
         name="Пират-рейдер",
         stats={"hull": 70, "damage": 12, "xp": 30},
@@ -271,6 +285,8 @@ ENEMIES: list[dict[str, Any]] = [
     ),
     dict(
         code="pirate_captain",
+        faction="pirates",
+        reputation={"pirates": -100},
         category="elite",
         name="Пиратский капитан",
         stats={"hull": 120, "damage": 16, "xp": 60},
@@ -580,6 +596,20 @@ async def ensure_seeds(session: AsyncSession) -> dict[str, int]:
             )
             created["modules"] += 1
 
+    for spec in NEUTRAL_FACTIONS:
+        if spec["code"] not in existing_factions:
+            faction = Faction(
+                code=spec["code"], name=spec["name"], description="",
+                kind="neutral", bonuses={}, start_resources={},
+            )
+            session.add(faction)
+            faction_rows[spec["code"]] = faction
+            created["factions"] += 1
+        else:
+            row = await session.scalar(sa.select(Faction).where(Faction.code == spec["code"]))
+            assert row is not None
+            faction_rows[spec["code"]] = row
+
     existing_ships = set((await session.scalars(sa.select(ShipTemplate.code))).all())
     for spec in FACTIONS:
         ship_code = spec["start_ship"]
@@ -702,6 +732,8 @@ async def ensure_seeds(session: AsyncSession) -> dict[str, int]:
                     abilities=spec["abilities"],
                     passives=spec["passives"],
                     weaknesses=spec["weaknesses"],
+                    faction_id=faction_rows[spec["faction"]].id if spec.get("faction") else None,
+                    reputation=dict(spec.get("reputation") or {}),
                     loot_table_id=loot_table_ids[spec["loot_code"]],
                 )
             )

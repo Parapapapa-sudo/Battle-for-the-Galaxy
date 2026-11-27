@@ -290,7 +290,7 @@ async def recipes(character: Character = Depends(current_character)) -> dict[str
 async def journal(character: Character = Depends(current_character)) -> dict[str, Any]:
     """Журнал: задания (активные и доступные), достижения (звания), репутация."""
     from app import quests as quests_mod
-    from app.models_game import CharacterTitle, Faction, Reputation
+    from app.models_game import CharacterTitle
 
     async with session_factory() as session, transactional(session):
         quests_out = []
@@ -313,17 +313,12 @@ async def journal(character: Character = Depends(current_character)) -> dict[str
                 sa.select(CharacterTitle).where(CharacterTitle.character_id == character.id)
             )
         ).all()
-        reps = (
-            await session.execute(
-                sa.select(Faction.name, Reputation.value)
-                .join(Reputation, Reputation.faction_id == Faction.id)
-                .where(Reputation.character_id == character.id)
-            )
-        ).all()
+        from app import reputation as reputation_app
+
         return {
             "quests": quests_out,
             "achievements": [{"code": t.title_code} for t in titles],
-            "reputation": [{"faction": name, "value": value} for name, value in reps],
+            "reputation": await reputation_app.list_reputations(session, character),
         }
 
 

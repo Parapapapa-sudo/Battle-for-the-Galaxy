@@ -434,7 +434,7 @@ async function viewJournal() {
     ? j.achievements.map(a => `<div class="row"><span>🏅 ${a.code}</span></div>`).join("")
     : `<div class="note">Достижений пока нет — они появятся за подвиги в игре.</div>`;
   const rep = j.reputation.length
-    ? j.reputation.map(r => row(r.faction, (r.value > 0 ? "+" : "") + r.value)).join("")
+    ? j.reputation.map(r => row(r.faction, (r.value > 0 ? "+" : "") + r.value + " · " + r.stage)).join("")
     : `<div class="note">Репутация не заработана.</div>`;
   return card("📜 Задания", quests) + card("🏅 Достижения", ach) + card("⭐ Репутация", rep);
 }

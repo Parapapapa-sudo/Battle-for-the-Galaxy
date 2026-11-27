@@ -134,7 +134,7 @@ async def test_seeds_idempotent(session):
     from app.seeds import ensure_seeds
 
     first = await ensure_seeds(session)
-    assert first["factions"] == 4 and first["items"] == 4 and first["ships"] == 4
+    assert first["factions"] == 9 and first["items"] == 4 and first["ships"] == 4  # 4 игровых + 5 нейтральных
     assert first["events"] == 8 and first["event_tables"] == 1
     assert first["enemies"] == 3 and first["enemy_abilities"] == 1 and first["loot_tables"] == 3
     assert first["modules"] == 4 and first["recipes"] == 3 and first["shop_offers"] == 5

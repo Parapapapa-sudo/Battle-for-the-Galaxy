@@ -332,6 +332,15 @@ async def _apply_outcome(
 
     effects.extend(await _roll_expedition_drop(session, character, rng))
 
+    # репутация из исхода события: {"faction_code": ±N} (ТЗ)
+    rep_deltas = outcome.get("reputation") or {}
+    if rep_deltas:
+        from app import reputation as reputation_app
+
+        effects.extend(
+            await reputation_app.apply_deltas(session, character, rep_deltas, character.lang)
+        )
+
     event.status = "resolved"
     event.resolution = {"outcome": outcome, "effects": effects}
     event.resolved_at = datetime.now(UTC)
