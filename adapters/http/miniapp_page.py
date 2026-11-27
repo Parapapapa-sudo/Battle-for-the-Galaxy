@@ -55,8 +55,15 @@ PAGE = """<!doctype html>
        url("/fonts/Orbix-Regular.ttf") format("truetype");
   font-display: swap;
 }
+/* цифры в Orbix проблемные — этот диапазон рендерим системным шрифтом */
+@font-face {
+  font-family: "Orbix";
+  src: local("Segoe UI"), local("Roboto"), local("Arial");
+  unicode-range: U+0030-0039, U+0660-0669;
+}
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+button, input, select, textarea { font-family: inherit; }
 body { font-family: "Orbix", -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #0b1020; color: #e7ecf5; min-height: 100vh; }
 header { position: sticky; top: 0; z-index: 5;
@@ -137,18 +144,18 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
   background: rgba(20, 27, 49, 0.42); border: 1px solid rgba(255,255,255,0.10);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   font-size: 14px; font-weight: 600; }
-.mat { display: inline-flex; align-items: center; gap: 4px; margin: 2px 8px 2px 0;
-  font-size: 12px; color: #cdd7ee; }
+.mat { display: inline-flex; align-items: center; gap: 3px; margin: 1px 4px 1px 0;
+  font-size: 11px; color: #cdd7ee; }
 .mat.lack { color: #ff9d9d; }
 .mat img { width: 18px; height: 18px; object-fit: contain; }
-.craftgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.craftcard { display: flex; flex-direction: column; gap: 6px; padding: 12px;
+.craftgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.craftcard { display: flex; flex-direction: column; gap: 5px; padding: 10px 8px;
   border-radius: 14px; background: rgba(20, 27, 49, 0.42);
   border: 1px solid rgba(255,255,255,0.10);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .craftcard .ci { font-size: 34px; text-align: center; }
-.craftcard .ci img { width: 44px; height: 44px; object-fit: contain; }
-.craftcard .cn { font-size: 13px; font-weight: 700; text-align: center; }
+.craftcard .ci img { width: 38px; height: 38px; object-fit: contain; }
+.craftcard .cn { font-size: 12px; font-weight: 700; text-align: center; }
 .craftcard .cd { font-size: 11px; color: #8b96ad; text-align: center; }
 .craftcard .btn { padding: 9px; font-size: 13px; margin-top: 4px; }
 .catch { font-size: 13px; color: #9fb4ff; text-transform: uppercase;
