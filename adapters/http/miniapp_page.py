@@ -50,20 +50,14 @@ PAGE = """<!doctype html>
 <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
 <style>
 @font-face {
-  font-family: "Quantix";
-  src: url("/fonts/Quantix-Regular.otf") format("opentype"),
-       url("/fonts/Quantix-Regular.ttf") format("truetype");
-  font-weight: 400; font-display: swap;
-}
-@font-face {
-  font-family: "Quantix";
-  src: url("/fonts/Quantix-ExtraBold.otf") format("opentype"),
-       url("/fonts/Quantix-ExtraBold.ttf") format("truetype");
-  font-weight: 700; font-display: swap;
+  font-family: "Orbix";
+  src: url("/fonts/Orbix-Regular.woff2") format("woff2"),
+       url("/fonts/Orbix-Regular.ttf") format("truetype");
+  font-display: swap;
 }
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Quantix", -apple-system, "Segoe UI", Roboto, sans-serif;
+body { font-family: "Orbix", -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #0b1020; color: #e7ecf5; min-height: 100vh; }
 header { position: sticky; top: 0; z-index: 5;
   background: rgba(16, 23, 54, 0.72);
