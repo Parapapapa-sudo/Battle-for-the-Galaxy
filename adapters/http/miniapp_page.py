@@ -50,15 +50,14 @@ PAGE = """<!doctype html>
 <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
 <style>
 @font-face {
-  font-family: "Orbix";
-  src: url("/fonts/Orbix-Regular.woff2") format("woff2"),
-       url("/fonts/Orbix-Regular.ttf") format("truetype");
-  font-display: swap;
+  font-family: "Exo 2";
+  src: url("/fonts/Exo2.ttf") format("truetype-variations");
+  font-weight: 100 900; font-display: swap;
 }
 :root { color-scheme: dark; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 button, input, select, textarea { font-family: inherit; }
-body { font-family: "Orbix", -apple-system, "Segoe UI", Roboto, sans-serif;
+body { font-family: "Exo 2", -apple-system, "Segoe UI", Roboto, sans-serif;
   background: #0b1020; color: #e7ecf5; min-height: 100vh; }
 header { position: sticky; top: 0; z-index: 5;
   background: rgba(16, 23, 54, 0.72);
@@ -177,7 +176,7 @@ const SECTIONS = [
 const SHIP_TABS = [["info", "Общая информация"], ["inv", "Инвентарь"], ["equip", "Оснащение"]];
 const ICONS = { resource: "⛏️", consumable: "💊", module: "🔩", repair_kit: "🧰", special: "💎" };
 const RAR = { common: "обычный", rare: "редкий", epic: "эпический", unique: "уникальный" };
-const VK_HASH = new URLSearchParams(LP).get("vk_hash") || "";
+const VK_HASH = (location.hash || "").replace(/^#/, "") || new URLSearchParams(LP).get("vk_hash") || "";
 let SECTION = ["ship", "craft", "shop", "journal", "stats"].includes(VK_HASH) ? VK_HASH : "ship";
 let SHIP_TAB = "info", TOAST = "", ME = null;
 
