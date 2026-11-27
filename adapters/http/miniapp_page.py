@@ -5,10 +5,27 @@
 Шапка-разделы: Корабль (инфо/инвентарь/оснащение), Магазин, Журнал, Статистика.
 """
 
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter(tags=["miniapp-frontend"])
+
+
+@router.get("/icons/{group}/{filename}")
+async def icon_file(group: str, filename: str) -> FileResponse:
+    """Раздача иконок предметов/товаров (assets/icons/<группа>/<код>.png)."""
+    import re
+
+    from app.images import ICONS_DIR
+
+    if not re.fullmatch(r"[a-z0-9_]+", group) or not re.fullmatch(
+        r"[a-z0-9_]+\.(png|jpg|webp)", filename
+    ):
+        raise HTTPException(status_code=404, detail="not found")
+    path = ICONS_DIR / group / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
 PAGE = """<!doctype html>
 <html lang="ru">
@@ -49,6 +66,8 @@ main { padding: 14px; max-width: 640px; margin: 0 auto; }
 .slot .qty { position: absolute; right: 4px; bottom: 2px; font-size: 11px; color: #fff;
   background: #4d7cff; border-radius: 8px; padding: 0 5px; font-weight: 700; }
 .slot.empty { cursor: default; opacity: .35; font-size: 18px; }
+.slot img { width: 78%; height: 78%; object-fit: contain; }
+.bigicon img { width: 96px; height: 96px; object-fit: contain; }
 .slot .lvl { position: absolute; left: 4px; top: 2px; font-size: 10px; color: #ffd479; }
 .bigicon { font-size: 56px; text-align: center; padding: 10px 0 4px; }
 .iname { text-align: center; font-size: 18px; font-weight: 700; }
@@ -101,6 +120,7 @@ let SECTION = "ship", SHIP_TAB = "info", TOAST = "";
 
 const $c = () => document.getElementById("content");
 const icon = (cat) => ICONS[cat] || "📦";
+const pic = (url, cat) => url ? `<img src="${url}" alt="">` : icon(cat);
 
 async function api(path, opts) {
   const r = await fetch(path, { headers: H, ...opts });
@@ -152,7 +172,7 @@ async function viewInventory() {
   const total = inv.size_limit || inv.items.length;
   let cells = inv.items.map(i =>
     `<div class="slot" onclick="openItem('${i.code}')" title="${i.name}">
-       ${icon(i.category)}<span class="qty">${i.qty}</span></div>`).join("");
+       ${pic(i.icon, i.category)}<span class="qty">${i.qty}</span></div>`).join("");
   for (let k = inv.items.length; k < Math.min(total, Math.max(10, inv.items.length)); k++) {
     cells += `<div class="slot empty">·</div>`;
   }
@@ -165,7 +185,7 @@ async function viewEquipment() {
   const eq = await api("/api/equipment");
   const cell = (m) =>
     `<div class="slot" onclick="openItem('${m.code}')" title="${m.name}">
-       ${m.kind === "ability" ? "⚡" : "🔩"}<span class="lvl">ур.${m.level}</span></div>`;
+       ${m.icon ? pic(m.icon, m.kind) : (m.kind === "ability" ? "⚡" : "🔩")}<span class="lvl">ур.${m.level}</span></div>`;
   const grid = (list, emptyText) => list.length
     ? `<div class="grid">${list.map(cell).join("")}</div>`
     : `<div class="note">${emptyText}</div>`;
@@ -184,7 +204,7 @@ async function openItem(code) {
   if (!it.sellable) chips += `<span class="chip">не продаётся</span>`;
   chips += `<span class="chip">стек до ${it.stack_limit}</span>`;
   let html = `<button class="back" onclick="render()">← Назад</button>` + toast();
-  html += `<div class="card"><div class="bigicon">${it.module ? (it.category === "module" && it.module.installed ? "🔩" : icon(it.category)) : icon(it.category)}</div>
+  html += `<div class="card"><div class="bigicon">${pic(it.icon, it.category)}</div>
     <div class="iname">${it.name}</div>
     <div class="rarity rar-${it.rarity}">${RAR[it.rarity] || it.rarity}</div>
     <div class="desc">${it.description || ""}</div>
@@ -208,8 +228,8 @@ async function viewShop() {
     const ic = o.kind === "pack" ? "💎" : "⭐";
     const price = o.kind === "pack" ? o.price_rub + " ₽" : o.price_eon + " Эонов";
     return `<div class="slot" style="aspect-ratio:auto;padding:10px 4px;flex-direction:column;gap:4px"
-      onclick="openOffer('${o.code}','${o.title}','${ic}','${price}','${o.kind}')">
-      <div style="font-size:26px">${ic}</div>
+      onclick="openOffer('${o.code}','${o.title}','${ic}','${price}','${o.kind}','${o.icon || ""}')">
+      <div style="font-size:26px">${o.icon ? `<img src="${o.icon}" style="width:40px;height:40px;object-fit:contain">` : ic}</div>
       <div style="font-size:11px;text-align:center">${o.title}</div>
       <div style="font-size:11px;color:#9fb4ff">${price}</div></div>`;
   }).join("");
@@ -217,9 +237,9 @@ async function viewShop() {
     + `<div class="note">Эоны ↔ Кванты также обмениваются на внутреннем аукционе (команда market в чате).
        Паки Эонов оплачиваются в рублях, подписки — за Эоны.</div>`;
 }
-function openOffer(code, title, ic, price, kind) {
+function openOffer(code, title, ic, price, kind, iconUrl) {
   $c().innerHTML = `<button class="back" onclick="render()">← Назад</button>` + toast()
-    + `<div class="card"><div class="bigicon">${ic}</div>
+    + `<div class="card"><div class="bigicon">${iconUrl ? `<img src="${iconUrl}" style="width:96px;height:96px;object-fit:contain">` : ic}</div>
        <div class="iname">${title}</div>
        <div class="rarity" style="color:#9fb4ff">${price}</div>
        <div class="desc">${kind === "pack"

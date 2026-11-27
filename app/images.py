@@ -18,6 +18,21 @@ BASE_DIR = Path("assets/images")
 EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
 CACHE_KEY = "images.cache"
 
+# Иконки предметов/товаров: assets/icons/<группа>/<код>.<ext> — кладутся вручную.
+# Группы: items (предметы по коду item_templates), shop (предложения магазина).
+ICONS_DIR = Path("assets/icons")
+ICON_EXTENSIONS = (".png", ".jpg", ".webp")
+
+
+def icon_url(group: str, code: str, base_dir: Path | None = None) -> str | None:
+    """URL иконки по коду (с ?v=mtime для сброса кэша) или None — фронт покажет эмодзи."""
+    folder = (base_dir or ICONS_DIR) / group
+    for ext in ICON_EXTENSIONS:
+        path = folder / f"{code}{ext}"
+        if path.is_file():
+            return f"/icons/{group}/{code}{ext}?v={path.stat().st_mtime_ns}"
+    return None
+
 
 def list_pack_files(pack: str, base_dir: Path | None = None) -> list[Path]:
     folder = (base_dir or BASE_DIR) / pack

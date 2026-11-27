@@ -123,10 +123,14 @@ async def inventory(
         raise HTTPException(status_code=400, detail="kind: ship|warehouse|waiting")
     async with session_factory() as session, transactional(session):
         inv, rows = await characters.list_inventory(session, character.id, kind=kind)
+        from app.images import icon_url
+
         return {
             "kind": kind,
             "size_limit": inv.size_limit,
-            "items": [r.__dict__ for r in rows],
+            "items": [
+                {**r.__dict__, "icon": icon_url("items", r.code)} for r in rows
+            ],
         }
 
 
@@ -164,8 +168,11 @@ async def item_detail(code: str, character: Character = Depends(current_characte
                 actions.append({"cmd": f"train {code} 10", "label": "Прокачать (+10 опыта)"})
             elif owned > 0:
                 actions.append({"cmd": f"install {code}", "label": "Установить на корабль"})
+        from app.images import icon_url
+
         return {
             "code": template.code,
+            "icon": icon_url("items", template.code),
             "name": template.name,
             "description": template.description,
             "category": template.category,
@@ -188,7 +195,11 @@ async def item_detail(code: str, character: Character = Depends(current_characte
 async def equipment(character: Character = Depends(current_character)) -> dict[str, Any]:
     """Оснащение: установленные модули (корабль) и способности (команда)."""
     async with session_factory() as session, transactional(session):
+        from app.images import icon_url
+
         mods = await modules.list_modules(session, character)
+        for m in mods:
+            m["icon"] = icon_url("items", m["code"])
         installed = [m for m in mods if m["installed"]]
         return {
             "ship_slots": [m for m in installed if m["kind"] != "ability"],
@@ -203,11 +214,14 @@ async def shop(character: Character = Depends(current_character)) -> dict[str, A
     from app import market
 
     async with session_factory() as session, transactional(session):
+        from app.images import icon_url
+
         offers = await market.list_offers(session)
         return {
             "offers": [
                 {
                     "code": o.code,
+                    "icon": icon_url("shop", o.code),
                     "kind": o.kind,
                     "title": market.offer_title(o, character.lang),
                     "price_rub": o.price_rub if o.kind == "pack" else None,

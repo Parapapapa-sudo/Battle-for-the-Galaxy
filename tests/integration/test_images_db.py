@@ -26,6 +26,17 @@ def test_pick_random_from_pack(tmp_path: Path):
     assert images.pick_random("no_such_pack", tmp_path) is None
 
 
+def test_icon_url_by_code(tmp_path: Path):
+    """Иконки по конвенции: assets/icons/<группа>/<код>.png; нет файла — None."""
+    folder = tmp_path / "items"
+    folder.mkdir(parents=True)
+    (folder / "scrap_metal.png").write_bytes(b"\x89PNG")
+    url = images.icon_url("items", "scrap_metal", tmp_path)
+    assert url is not None and url.startswith("/icons/items/scrap_metal.png?v=")
+    assert images.icon_url("items", "no_icon_item", tmp_path) is None
+    assert images.icon_url("shop", "scrap_metal", tmp_path) is None  # другая группа
+
+
 @requires_db
 async def test_battle_outcome_carries_image_pack(session, seeded, sessions):
     """Финал боя: победа → пак victory, раунды — без картинки."""
